@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.ModelInterfaceDao">
+
+    <!-- ================== insert ================== -->
+    <insert id="insertModelInterface"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity"
+            useGeneratedKeys="true"
+            keyProperty="interfaceId">
+
+        INSERT INTO model_interface
+        (
+            processmodel_id,
+            interface_name,
+            is_default,
+            created_at,
+            updated_at,
+            interface_summary
+        )
+        VALUES
+            (
+                #{processmodelId},
+                #{interfaceName},
+                #{isDefault},
+                #{createdAt},
+                #{updatedAt},
+                #{interfaceSummary}
+            )
+    </insert>
+
+    <!-- ================== selectById ================== -->
+    <select id="selectById"
+            parameterType="java.lang.Integer"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity">
+
+        SELECT
+            interface_id AS interfaceId,
+            processmodel_id AS processmodelId,
+            interface_name AS interfaceName,
+            is_default AS isDefault,
+            created_at AS createdAt,
+            updated_at AS updatedAt,
+            interface_summary AS interfaceSummary
+        FROM model_interface
+        WHERE interface_id = #{interfaceId}
+    </select>
+
+</mapper>

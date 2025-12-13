@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.ParameterDao">
+
+    <!-- 插入 Parameter -->
+    <insert id="insertParameter"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity"
+            useGeneratedKeys="true"
+            keyProperty="parameterId">
+
+        INSERT INTO parameter (
+        interface_id,
+        io_type,
+        temporal_resolution_value,
+        temporal_resolution_unit,
+        temporal_range_value,
+        temporal_range_unit,
+        origin_point,
+        row_count,
+        column_count,
+        z_count,
+        spatial_resolution_x,
+        spatial_resolution_y,
+        spatial_resolution_z,
+        spatial_resolution_unit,
+        coverage_geom,
+        created_at,
+        updated_at,
+        tensor_order
+        )
+        VALUES (
+        #{interfaceId},
+        #{ioType},
+        #{temporalResolutionValue},
+        #{temporalResolutionUnit},
+        #{temporalRangeValue},
+        #{temporalRangeUnit},
+
+        ST_GeomFromText(#{originPoint}, 4326),
+
+        #{rowCount},
+        #{columnCount},
+        #{zCount},
+        #{spatialResolutionX},
+        #{spatialResolutionY},
+        #{spatialResolutionZ},
+        #{spatialResolutionUnit},
+
+        <!-- coverage_geom -->
+        <choose>
+            <when test="rowCount == null or columnCount == null">
+                ST_GeomFromText(#{originPoint}, 4326)
+            </when>
+
+            <when test="zCount == null or zCount == 0">
+                ST_MakePolygon(
+                ST_MakeLine(ARRAY[
+                ST_GeomFromText(#{originPoint}, 4326),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, 0),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, -#{rowCount} * #{spatialResolutionY}),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), 0, -#{rowCount} * #{spatialResolutionY}),
+                ST_GeomFromText(#{originPoint}, 4326)
+                ])
+                )
+            </when>
+
+            <otherwise>
+                ST_Force3D(
+                ST_Extrude(
+                ST_MakePolygon(
+                ST_MakeLine(ARRAY[
+                ST_GeomFromText(#{originPoint}, 4326),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, 0),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, -#{rowCount} * #{spatialResolutionY}),
+                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), 0, -#{rowCount} * #{spatialResolutionY}),
+                ST_GeomFromText(#{originPoint}, 4326)
+                ])
+                ),
+                #{zCount} * #{spatialResolutionZ}
+                )
+                )
+            </otherwise>
+        </choose>,
+
+        #{createdAt},
+        #{updatedAt},
+        #{tensorOrder}
+        )
+    </insert>
+
+    <!-- 根据 ID 查询 Parameter -->
+    <select id="selectById"
+            parameterType="int"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity">
+        SELECT
+            parameter_id,
+            interface_id,
+            io_type,
+            temporal_resolution_value,
+            temporal_resolution_unit,
+            temporal_range_value,
+            temporal_range_unit,
+            ST_AsText(origin_point) AS origin_point,
+            row_count,
+            column_count,
+            z_count,
+            spatial_resolution_x,
+            spatial_resolution_y,
+            spatial_resolution_z,
+            spatial_resolution_unit,
+            ST_AsText(coverage_geom) AS coverage_geom,
+            created_at,
+            updated_at,
+            tensor_order
+        FROM parameter
+        WHERE parameter_id = #{parameterId}
+    </select>
+
+</mapper>

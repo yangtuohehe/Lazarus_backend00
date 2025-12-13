@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.DynamicProcessModelDao">
+
+    <!--
+        新增 DynamicProcessModel
+        - processmodel_id 使用数据库自增
+        - created_at / updated_at 由 Service 层统一设置
+    -->
+    <insert id="insertDynamicProcessModel"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity"
+            useGeneratedKeys="true"
+            keyProperty="processmodelId">
+
+        INSERT INTO dynamic_process_model
+        (
+            model_name,
+            model_source_paper,
+            model_author,
+            model_summary,
+            model_file,
+            created_at,
+            updated_at
+        )
+        VALUES
+            (
+                #{modelName},
+                #{modelSourcePaper},
+                #{modelAuthor},
+                #{modelSummary},
+                #{modelFile},
+                #{createdAt},
+                #{updatedAt}
+            )
+    </insert>
+
+    <!-- 根据 ID 查询 DynamicProcessModel -->
+    <select id="selectById"
+            parameterType="int"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity">
+
+        SELECT *
+        FROM dynamic_process_model
+        WHERE processmodel_id = #{processmodelId}
+    </select>
+
+</mapper>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.FeatureDao">
+
+    <!-- 新增 Feature，使用 RETURNING 回写 featureId -->
+    <insert id="insertFeature"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity"
+            useGeneratedKeys="true"
+            keyProperty="featureId">
+
+        INSERT INTO feature (
+            feature_name,
+            created_at,
+            updated_at,
+            parameter_id,
+            dimension_index
+        )
+        VALUES (
+                   #{featureName},
+                   #{createdAt},
+                   #{updatedAt},
+                   #{parameterId},
+                   #{dimensionIndex}
+               )
+    </insert>
+
+    <!-- 查询 Feature by ID -->
+    <select id="selectById" parameterType="int" resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity">
+        SELECT feature_id, feature_name, created_at, updated_at, parameter_id, dimension_index
+        FROM feature
+        WHERE feature_id = #{featureId}
+    </select>
+
+</mapper>
+
