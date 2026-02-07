@@ -5,11 +5,10 @@
 
 <mapper namespace="com.example.lazarus_backend00.dao.ModelInterfaceDao">
 
-    <!-- ================== insert ================== -->
-    <insert id="insertModelInterface"
+    <insert id="insert"
             parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity"
             useGeneratedKeys="true"
-            keyProperty="interfaceId">
+            keyProperty="id">
 
         INSERT INTO model_interface
         (
@@ -31,21 +30,48 @@
             )
     </insert>
 
-    <!-- ================== selectById ================== -->
     <select id="selectById"
-            parameterType="java.lang.Integer"
             resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity">
 
         SELECT
-            interface_id AS interfaceId,
-            processmodel_id AS processmodelId,
-            interface_name AS interfaceName,
-            is_default AS isDefault,
-            created_at AS createdAt,
-            updated_at AS updatedAt,
+            id,
+            processmodel_id   AS processmodelId,
+            interface_name    AS interfaceName,
+            is_default        AS isDefault,
+            created_at        AS createdAt,
+            updated_at        AS updatedAt,
             interface_summary AS interfaceSummary
         FROM model_interface
-        WHERE interface_id = #{interfaceId}
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByCondition"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity">
+
+        SELECT
+        id,
+        processmodel_id   AS processmodelId,
+        interface_name    AS interfaceName,
+        is_default        AS isDefault,
+        created_at        AS createdAt,
+        updated_at        AS updatedAt,
+        interface_summary AS interfaceSummary
+        FROM model_interface
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+
+            <if test="processmodelId != null">
+                AND processmodel_id = #{processmodelId}
+            </if>
+
+            <if test="interfaceName != null and interfaceName != ''">
+                AND interface_name LIKE CONCAT('%', #{interfaceName}, '%')
+            </if>
+        </where>
+        ORDER BY created_at DESC
     </select>
 
 </mapper>

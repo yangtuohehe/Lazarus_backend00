@@ -5,34 +5,58 @@
 
 <mapper namespace="com.example.lazarus_backend00.dao.FeatureDao">
 
-    <!-- 新增 Feature，使用 RETURNING 回写 featureId -->
-    <insert id="insertFeature"
+    <insert id="insert"
             parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity"
             useGeneratedKeys="true"
-            keyProperty="featureId">
+            keyProperty="id">
 
         INSERT INTO feature (
             feature_name,
             created_at,
-            updated_at,
-            parameter_id,
-            dimension_index
+            updated_at
         )
         VALUES (
                    #{featureName},
                    #{createdAt},
-                   #{updatedAt},
-                   #{parameterId},
-                   #{dimensionIndex}
+                   #{updatedAt}
                )
     </insert>
 
-    <!-- 查询 Feature by ID -->
-    <select id="selectById" parameterType="int" resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity">
-        SELECT feature_id, feature_name, created_at, updated_at, parameter_id, dimension_index
+    <select id="selectById"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity">
+
+        SELECT
+            id,              feature_name    AS featureName,
+            created_at      AS createdAt,
+            updated_at      AS updatedAt
         FROM feature
-        WHERE feature_id = #{featureId}
+        WHERE id = #{id}     </select>
+
+    <select id="selectByCondition"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity">
+
+        SELECT
+        id,
+        feature_name    AS featureName,
+        created_at      AS createdAt,
+        updated_at      AS updatedAt
+        FROM feature
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+
+            <if test="featureName != null and featureName != ''">
+                AND feature_name = #{featureName}
+            </if>
+
+            <if test="createdAt != null">
+                AND created_at = #{createdAt}
+            </if>
+        </where>
+
+        ORDER BY created_at DESC
     </select>
 
 </mapper>
-

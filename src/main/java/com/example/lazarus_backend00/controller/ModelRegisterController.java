@@ -1,216 +1,194 @@
 package com.example.lazarus_backend00.controller;
-import com.example.lazarus_backend00.service.ModelRegisterService;
 
-import com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity;
-import com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureEntity;
-import com.example.lazarus_backend00.infrastructure.persistence.entity.ModelInterfaceEntity;
-import com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.lazarus_backend00.dto.*;
+import com.example.lazarus_backend00.infrastructure.persistence.entity.*;
+import com.example.lazarus_backend00.domain.axis.Axis;
+import com.example.lazarus_backend00.service.ModelRegisterService;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.PrecisionModel;
+import org.springframework.beans.BeanUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.lang.reflect.Field;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/model")
-@CrossOrigin(origins = "http://localhost:5173")  // 允许前端端口访问
+@CrossOrigin(origins = "http://localhost:5173")
 public class ModelRegisterController {
+
     private final ModelRegisterService modelRegisterService;
+
+    // 指定 SRID=4326 (WGS84)
+    private final GeometryFactory gf = new GeometryFactory(new PrecisionModel(), 4326);
+
     public ModelRegisterController(ModelRegisterService modelRegisterService) {
         this.modelRegisterService = modelRegisterService;
     }
 
-    @PostMapping(
-            value = "/regeister",
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
-    )
-    public ResponseEntity<?> parseFormData(
-            @RequestPart("payload") String payloadJson,
+    @PostMapping(value = "/register", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> registerModel(
+            @RequestPart("payload") ModelRegisterRequest requestDto,
             @RequestPart("modelFile") MultipartFile modelFile
     ) throws Exception {
 
-        System.out.println("===== 接收到 multipart/form-data =====");
+        System.out.println("===== 接收到请求: 开始解析 =====");
 
-        // -------------------------
-        // 1. 解析 JSON 字符串
-        // -------------------------
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, Object> payload = mapper.readValue(payloadJson, Map.class);
-        // -------------------------
-        // 2. 接收 modelFile → byte[]
-        // -------------------------
-        byte[] modelBytes = modelFile.getBytes();
-        System.out.println("✔ 接收到文件，大小 = " + modelBytes.length + " bytes");
+        // 1. Model
+        DynamicProcessModelEntity modelEntity = new DynamicProcessModelEntity();
+        // ✅ 修正：使用标准的驼峰命名 Getter (Lombok 生成)
+        BeanUtils.copyProperties(requestDto.getDynamicProcessModel(), modelEntity);
+        modelEntity.setModelFile(modelFile.getBytes());
 
-        // -------------------------
-        // 1. dynamicprocessmodel
-        // -------------------------
-        Map<String, Object> dpJson = (Map<String, Object>) payload.get("dynamicprocessmodel");
-
-        DynamicProcessModelEntity model = new DynamicProcessModelEntity();
-        model.setModelName((String) dpJson.get("modelName"));
-        model.setModelSourcePaper((String) dpJson.get("modelSourcePaper"));
-        model.setModelAuthor((String) dpJson.get("modelAuthor"));
-        model.setModelSummary((String) dpJson.get("modelSummary"));
-        model.setModelFile(modelBytes);
-
-        System.out.println("✔ DynamicProcessModelEntity:");
-        printObject(model);
-
-
-        // -------------------------
-        // 2. modelinterface
-        // -------------------------
-        Map<String, Object> interfaceJson = (Map<String, Object>) payload.get("modelinterface");
-
+        // 2. Interface
         ModelInterfaceEntity interfaceEntity = new ModelInterfaceEntity();
-        interfaceEntity.setInterfaceName((String) interfaceJson.get("interfaceName"));
-        interfaceEntity.setInterfaceSummary((String) interfaceJson.get("interfaceSummary"));
-        interfaceEntity.setIsDefault((Boolean) interfaceJson.get("isDefault"));
-
+        // ✅ 修正：使用标准的驼峰命名 Getter
+        BeanUtils.copyProperties(requestDto.getModelInterface(), interfaceEntity);
         interfaceEntity.setProcessmodelId(null);
-        interfaceEntity.setInterfaceType("default");
 
-        System.out.println("\n✔ ModelInterfaceEntity:");
-        printObject(interfaceEntity);
-
-
-        // -------------------------
-        // 3. parameters
-        // -------------------------
-        List<Map<String, Object>> parameterJsonList =
-                (List<Map<String, Object>>) interfaceJson.get("parameters");
-
+        // 3. Parameters
         List<ParameterEntity> parameterEntities = new ArrayList<>();
-        List<List<FeatureEntity>> featureMatrix = new ArrayList<>(); // 每个 Parameter 对应一个 List<FeatureEntity>
+        List<List<FeatureEntity>> featureMatrix = new ArrayList<>();
+        List<List<Axis>> axisMatrix = new ArrayList<>();
 
-        int paramIndex = 0;
+        // ✅ 修正：使用 getModelInterface()
+        if (requestDto.getModelInterface().getParameters() != null) {
+            for (ParameterDTO pDto : requestDto.getModelInterface().getParameters()) {
 
-        for (Map<String, Object> pJson : parameterJsonList) {
+                ParameterEntity param = new ParameterEntity();
+                param.setIoType(pDto.getIoType());
+                param.setTensorOrder(pDto.getTensorOrder());
 
-            ParameterEntity param = new ParameterEntity();
+                // 处理原点 (2D/3D)
+                Coordinate coord;
+                if (pDto.getOriginPointAlt() != null) {
+                    coord = new Coordinate(pDto.getOriginPointLon(), pDto.getOriginPointLat(), pDto.getOriginPointAlt());
+                } else {
+                    coord = new Coordinate(pDto.getOriginPointLon(), pDto.getOriginPointLat());
+                }
+                param.setOriginPoint(gf.createPoint(coord));
 
-            param.setIoType((String) pJson.get("ioType"));
-            param.setTemporalResolutionValue(toInt(pJson.get("temporalResolutionValue")));
-            param.setTemporalResolutionUnit((String) pJson.get("temporalResolutionUnit"));
-            param.setTemporalRangeValue(toInt(pJson.get("temporalRangeValue")));
-            param.setTemporalRangeUnit((String) pJson.get("temporalRangeUnit"));
+                parameterEntities.add(param);
 
-            param.setRowCount(toInt(pJson.get("rowCount")));
-            param.setColumnCount(toInt(pJson.get("columnCount")));
-            param.setZCount(toInt(pJson.get("zCount")));
+                // Axis 列表处理
+                List<Axis> currentAxisList = new ArrayList<>();
+                if (pDto.getAxis() != null) {
+                    for (AxisDTO aDto : pDto.getAxis()) {
+                        // 调用下方的转换方法
+                        currentAxisList.add(convertAxisDtoToEntity(aDto));
+                    }
+                }
+                axisMatrix.add(currentAxisList);
 
-            param.setSpatialResolutionX(toDouble(pJson.get("spatialResolutionX")));
-            param.setSpatialResolutionY(toDouble(pJson.get("spatialResolutionY")));
-            param.setSpatialResolutionZ(toDouble(pJson.get("spatialResolutionZ")));
-            param.setSpatialResolutionUnit((String) pJson.get("spatialResolutionUnit"));
-
-            param.setTensorOrder((String) pJson.get("tensorOrder"));
-
-            param.setInterfaceId(null);
-
-            parameterEntities.add(param);
-
-            System.out.println("\n✔ ParameterEntity [" + paramIndex + "]");
-            //printObject(param);
-
-            // 处理每个 Parameter 对应的 features
-            List<Map<String, Object>> featsJson = (List<Map<String, Object>>) pJson.get("features");
-            List<FeatureEntity> featureList = new ArrayList<>();
-
-            int featIndex = 0;
-            for (Map<String, Object> fJson : featsJson) {
-                FeatureEntity feature = new FeatureEntity();
-                feature.setFeatureName((String) fJson.get("featureName"));
-                feature.setDimensionIndex(toInt(fJson.get("dimensionIndex")));
-                feature.setParameterId(null);
-
-                featureList.add(feature);
-
-                System.out.println("  ✔ FeatureEntity [" + featIndex + "]");
-
-                featIndex++;
-            }
-
-            featureMatrix.add(featureList);
-            paramIndex++;
-        }
-
-        // -------------------------
-        // 打印 Parameter 和 Feature 矩阵
-        // -------------------------
-        System.out.println("===== ParameterEntities =====");
-        for (int i = 0; i < parameterEntities.size(); i++) {
-            System.out.println("✔ ParameterEntity [" + i + "]");
-            printObject(parameterEntities.get(i));
-        }
-
-        System.out.println("===== Feature Matrix =====");
-        for (int i = 0; i < featureMatrix.size(); i++) {
-            System.out.println("Parameter [" + i + "] features:");
-            List<FeatureEntity> feats = featureMatrix.get(i);
-            for (int j = 0; j < feats.size(); j++) {
-                System.out.println("  ✔ FeatureEntity [" + j + "]");
-                printObject(feats.get(j));
+                // Feature 列表处理
+                List<FeatureEntity> currentFeatureList = new ArrayList<>();
+                if (pDto.getFeatures() != null) {
+                    for (FeatureDTO fDto : pDto.getFeatures()) {
+                        FeatureEntity feature = new FeatureEntity();
+                        feature.setFeatureName(fDto.getFeatureName());
+                        currentFeatureList.add(feature);
+                    }
+                }
+                featureMatrix.add(currentFeatureList);
             }
         }
 
-
-        // -------------------------
-        // 调用 Service 完成模型入库
-        // -------------------------
         Integer processmodelId = modelRegisterService.registerModel(
-                model, interfaceEntity, parameterEntities, featureMatrix
+                modelEntity, interfaceEntity, parameterEntities, featureMatrix, axisMatrix
         );
-        System.out.println("✔ 模型入库完成，processmodelId = " + processmodelId);
-//
-//        // 返回结构也改成二维 features
-//        Map<String, Object> result = new LinkedHashMap<>();
-//        result.put("model", model);
-//        result.put("interface", interfaceEntity);
-//        result.put("parameters", parameterEntities);
-//        result.put("features", featureMatrix); // 二维列表
-//        result.put("processmodelId", processmodelId);
-        return ResponseEntity.ok("成功入库");
+
+        return ResponseEntity.ok("成功入库, 模型ID: " + processmodelId);
     }
 
 
-    // -------------------------
-    // 工具：打印对象所有属性
-    // -------------------------
-    private void printObject(Object obj) {
-        try {
-            Class<?> clazz = obj.getClass();
-            for (Field field : clazz.getDeclaredFields()) {
-                field.setAccessible(true);
-                System.out.println("   " + field.getName() + " = " + field.get(obj));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    /**
+     * 【调试专用接口】
+     * 作用：生成一个后端完美兼容的 DTO 对象，并以 JSON 返回。
+     * 用法：调用此接口，复制返回的 JSON，那就是标准答案。
+     */
+    @GetMapping("/structure")
+    public ResponseEntity<ModelRegisterRequest> getStandardJsonStructure() {
+        ModelRegisterRequest request = new ModelRegisterRequest();
+
+        // 1. 组装 Model 部分 (重点关注 version 类型)
+        DynamicProcessModelDTO modelDto = new DynamicProcessModelDTO();
+        modelDto.setModelName("标准结构示例模型");
+        modelDto.setModelAuthor("DebugTool");
+        modelDto.setModelSummary("此 JSON 由后端直接生成，格式绝对正确");
+        modelDto.setModelSourcePaper("无");
+        modelDto.setVersion(1); // ✅ 重点：设置整数 1
+        request.setDynamicProcessModel(modelDto); // 这里的 Setter 决定了 JSON Key 是 dynamicProcessModel
+
+        // 2. 组装 Interface 部分
+        ModelInterfaceDTO interfaceDto = new ModelInterfaceDTO();
+        interfaceDto.setInterfaceName("标准接口");
+        interfaceDto.setDefault(true);
+        interfaceDto.setInterfaceSummary("调试用");
+
+        // 3. 组装 Parameter 部分 (重点关注 tensorOrder 类型)
+        List<ParameterDTO> params = new ArrayList<>();
+        ParameterDTO param = new ParameterDTO();
+        param.setIoType("INPUT");
+        param.setTensorOrder(0); // ✅ 重点：设置整数 0
+        param.setOriginPointLon(110.5);
+        param.setOriginPointLat(20.0);
+
+        // 4. 组装 Axis 部分 (重点关注 type 字段)
+        List<AxisDTO> axes = new ArrayList<>();
+
+        // 时间轴
+        TimeAxisDTO tAxis = new TimeAxisDTO();
+        tAxis.setType("TIME"); // ✅ 重点：后端靠这个字符串区分类型
+        tAxis.setDimensionIndex(1);
+        tAxis.setCount(10);
+        tAxis.setResolution(1.0);
+        tAxis.setUnit("hour");
+        axes.add(tAxis);
+
+        // 空间轴
+        SpaceAxisXDTO xAxis = new SpaceAxisXDTO();
+        xAxis.setType("SPACE_X"); // ✅ 重点
+        xAxis.setDimensionIndex(2);
+        xAxis.setCount(50);
+        xAxis.setResolution(0.1);
+        xAxis.setUnit("degree");
+        axes.add(xAxis);
+
+        param.setAxis(axes);
+
+        // 5. 组装 Feature 部分
+        List<FeatureDTO> features = new ArrayList<>();
+        FeatureDTO f = new FeatureDTO();
+        f.setFeatureName("temperature");
+        features.add(f);
+
+        param.setFeatures(features);
+
+        params.add(param);
+        interfaceDto.setParameters(params);
+
+        request.setModelInterface(interfaceDto); // 这里的 Setter 决定了 JSON Key 是 modelInterface
+
+        return ResponseEntity.ok(request);
     }
 
-    // -------------------------
-    // 工具：类型转换
-    // -------------------------
-    private Integer toInt(Object obj) {
-        if (obj == null) return null;
-        if (obj instanceof Integer) return (Integer) obj;
-        if (obj instanceof String) return Integer.valueOf((String) obj);
-        return null;
-    }
 
-    private Double toDouble(Object obj) {
-        if (obj == null) return null;
-        if (obj instanceof Number) return ((Number) obj).doubleValue();
-        if (obj instanceof String) return Double.valueOf((String) obj);
-        return null;
+
+
+
+
+    private Axis convertAxisDtoToEntity(AxisDTO dto) {
+        Axis entity;
+        if (dto instanceof TimeAxisDTO) entity = new TimeAxisEntity();
+        else if (dto instanceof SpaceAxisXDTO) entity = new SpaceAxisXEntity();
+        else if (dto instanceof SpaceAxisYDTO) entity = new SpaceAxisYEntity();
+        else if (dto instanceof SpaceAxisZDTO) entity = new SpaceAxisZEntity();
+        else throw new IllegalArgumentException("Unknown Axis Type");
+        BeanUtils.copyProperties(dto, entity);
+        return entity;
     }
 }

@@ -5,46 +5,90 @@
 
 <mapper namespace="com.example.lazarus_backend00.dao.DynamicProcessModelDao">
 
-    <!--
-        新增 DynamicProcessModel
-        - processmodel_id 使用数据库自增
-        - created_at / updated_at 由 Service 层统一设置
-    -->
-    <insert id="insertDynamicProcessModel"
+    <insert id="insert"
             parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity"
             useGeneratedKeys="true"
-            keyProperty="processmodelId">
-
-        INSERT INTO dynamic_process_model
-        (
+            keyProperty="id">
+        INSERT INTO dynamic_process_model (
             model_name,
             model_source_paper,
             model_author,
             model_summary,
-            model_file,
+            version,  model_file,
             created_at,
             updated_at
         )
-        VALUES
-            (
-                #{modelName},
-                #{modelSourcePaper},
-                #{modelAuthor},
-                #{modelSummary},
-                #{modelFile},
-                #{createdAt},
-                #{updatedAt}
-            )
+        VALUES (
+                   #{modelName},
+                   #{modelSourcePaper},
+                   #{modelAuthor},
+                   #{modelSummary},
+                   #{version},  #{modelFile},
+                   #{createdAt},
+                   #{updatedAt}
+               )
     </insert>
 
-    <!-- 根据 ID 查询 DynamicProcessModel -->
     <select id="selectById"
-            parameterType="int"
             resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity">
-
-        SELECT *
+        SELECT
+            id,
+            model_name          AS modelName,
+            model_source_paper  AS modelSourcePaper,
+            model_author        AS modelAuthor,
+            model_summary       AS modelSummary,
+            version             AS version,  /* model_file 不查，防止内存溢出 */
+            created_at          AS createdAt,
+            updated_at          AS updatedAt
         FROM dynamic_process_model
-        WHERE processmodel_id = #{processmodelId}
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByCondition"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity">
+        SELECT
+        id,
+        model_name          AS modelName,
+        model_source_paper  AS modelSourcePaper,
+        model_author        AS modelAuthor,
+        model_summary       AS modelSummary,
+        version             AS version,  /* model_file 不查 */
+        created_at          AS createdAt,
+        updated_at          AS updatedAt
+        FROM dynamic_process_model
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+            <if test="modelName != null and modelName != ''">
+                AND model_name LIKE CONCAT('%', #{modelName}, '%')
+            </if>
+            <if test="modelAuthor != null and modelAuthor != ''">
+                AND model_author LIKE CONCAT('%', #{modelAuthor}, '%')
+            </if>
+            <if test="modelSourcePaper != null and modelSourcePaper != ''">
+                AND model_source_paper LIKE CONCAT('%', #{modelSourcePaper}, '%')
+            </if>
+            <if test="version != null and version != ''">
+                AND version = #{version}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="selectModelFile"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity">
+        SELECT model_file
+        FROM dynamic_process_model
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectModelHeader"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.DynamicProcessModelEntity">
+        SELECT SUBSTRING(model_file FROM 1 FOR 16) AS model_file
+        FROM dynamic_process_model
+        WHERE id = #{id}
     </select>
 
 </mapper>

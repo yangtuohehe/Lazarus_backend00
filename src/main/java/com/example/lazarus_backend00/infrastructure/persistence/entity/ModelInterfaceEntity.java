@@ -7,17 +7,14 @@ import java.time.LocalDateTime;
  */
 public class ModelInterfaceEntity {
 
-    /** model_interface.interface_id */
-    private Integer interfaceId;
+    /** 主键 id */
+    private Integer id;
 
     /** model_interface.processmodel_id */
     private Integer processmodelId;
 
     /** model_interface.interface_name */
     private String interfaceName;
-
-    /** model_interface.interface_type */
-    private String interfaceType;
 
     /** model_interface.is_default */
     private Boolean isDefault;
@@ -31,14 +28,14 @@ public class ModelInterfaceEntity {
     /** model_interface.interface_summary (jsonb) */
     private String interfaceSummary;
 
-    // -------- getter / setter --------
+    // -------- getter / setter (标准命名) --------
 
-    public Integer getInterfaceId() {
-        return interfaceId;
+    public Integer getId() {
+        return id;
     }
 
-    public void setInterfaceId(Integer interfaceId) {
-        this.interfaceId = interfaceId;
+    public void setId(Integer id) {
+        this.id = id;
     }
 
     public Integer getProcessmodelId() {
@@ -55,14 +52,6 @@ public class ModelInterfaceEntity {
 
     public void setInterfaceName(String interfaceName) {
         this.interfaceName = interfaceName;
-    }
-
-    public String getInterfaceType() {
-        return interfaceType;
-    }
-
-    public void setInterfaceType(String interfaceType) {
-        this.interfaceType = interfaceType;
     }
 
     public Boolean getIsDefault() {

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.FeatureParameterDao">
+
+    <insert id="insert"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureParameterEntity"
+            useGeneratedKeys="true"
+            keyProperty="id">
+
+        INSERT INTO feature_parameter (
+            feature_id,
+            parameter_id,
+            feature_layer,
+            dimension_index   )
+        VALUES (
+                   #{featureId},
+                   #{parameterId},
+                   #{featureLayer},
+                   #{dimensionIndex} )
+    </insert>
+
+    <select id="selectByDynamicAttributes"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureParameterEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.FeatureParameterEntity">
+
+        SELECT
+        id,
+        feature_id      AS featureId,
+        parameter_id    AS parameterId,
+        feature_layer   AS featureLayer,
+        dimension_index AS dimensionIndex  FROM feature_parameter
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+            <if test="featureId != null">
+                AND feature_id = #{featureId}
+            </if>
+            <if test="parameterId != null">
+                AND parameter_id = #{parameterId}
+            </if>
+            <if test="featureLayer != null">
+                AND feature_layer = #{featureLayer}
+            </if>
+            <if test="dimensionIndex != null">
+                AND dimension_index = #{dimensionIndex}
+            </if>
+        </where>
+    </select>
+
+</mapper>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.SpaceAxisXDao">
+
+    <insert id="insert"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.SpaceAxisXEntity"
+            useGeneratedKeys="true"
+            keyProperty="id">
+
+        INSERT INTO space_axis_x (
+            parameter_id,
+            dimension_index,
+            count,
+            resolution,
+            unit,
+            created_at,
+            updated_at
+        )
+        VALUES (
+                   #{parameterId},
+                   #{dimensionIndex},
+                   #{count},
+                   #{resolution},
+                   #{unit},
+                   #{createdAt},
+                   #{updatedAt}
+               )
+    </insert>
+
+    <select id="selectById"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.SpaceAxisXEntity">
+
+        SELECT
+            id,
+            parameter_id    AS parameterId,
+            count,
+            dimension_index AS dimensionIndex,
+            resolution,
+            unit,
+            created_at      AS createdAt,
+            updated_at      AS updatedAt     FROM space_axis_x
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByParameterId"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.SpaceAxisXEntity">
+
+        SELECT
+            id,
+            parameter_id    AS parameterId,
+            dimension_index AS dimensionIndex,
+            count,
+            resolution,
+            unit,
+            created_at      AS createdAt,
+            updated_at      AS updatedAt
+        FROM space_axis_x
+        WHERE parameter_id = #{parameterId}
+    </select>
+
+    <select id="selectByCondition"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.SpaceAxisXEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.SpaceAxisXEntity">
+
+        SELECT
+        id,
+        parameter_id    AS parameterId,
+        count,
+        resolution,
+        unit,
+        created_at      AS createdAt,
+        updated_at      AS updatedAt
+        FROM space_axis_x
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+            <if test="parameterId != null">
+                AND parameter_id = #{parameterId}
+            </if>
+            <if test="dimensionIndex != null">
+                AND dimension_index = #{dimensionIndex}
+            </if>
+            <if test="count != null">
+                AND count = #{count}
+            </if>
+            <if test="resolution != null">
+                AND resolution = #{resolution}
+            </if>
+            <if test="unit != null and unit != ''">
+                AND unit = #{unit}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+    </select>
+
+</mapper>

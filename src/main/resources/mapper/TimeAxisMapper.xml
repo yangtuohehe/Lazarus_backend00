@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.lazarus_backend00.dao.TimeAxisDao">
+
+    <insert id="insert"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.TimeAxisEntity"
+            useGeneratedKeys="true"
+            keyProperty="id">
+
+        INSERT INTO time_axis (
+            parameter_id,
+            count,
+            resolution,
+            unit,
+            created_at,
+            updated_at
+        )
+        VALUES (
+                   #{parameterId},
+                   #{count},
+                   #{resolution},
+                   #{unit},
+                   #{createdAt},
+                   #{updatedAt}
+               )
+    </insert>
+
+    <select id="selectById"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.TimeAxisEntity">
+
+        SELECT
+            id,
+            parameter_id    AS parameterId,  count,
+            resolution,
+            unit,
+            created_at      AS createdAt,    updated_at      AS updatedAt     FROM time_axis
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByParameterId"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.TimeAxisEntity">
+
+        SELECT
+            id,
+            parameter_id    AS parameterId,  count,
+            resolution,
+            unit,
+            created_at      AS createdAt,
+            updated_at      AS updatedAt
+        FROM time_axis
+        WHERE parameter_id = #{parameterId}
+    </select>
+
+    <select id="selectByCondition"
+            parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.TimeAxisEntity"
+            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.TimeAxisEntity">
+
+        SELECT
+        id,
+        parameter_id    AS parameterId,  count,
+        resolution,
+        unit,
+        created_at      AS createdAt,
+        updated_at      AS updatedAt
+        FROM time_axis
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+
+            <if test="parameterId != null">
+                AND parameter_id = #{parameterId}
+            </if>
+
+            <if test="count != null">
+                AND count = #{count}
+            </if>
+
+            <if test="resolution != null">
+                AND resolution = #{resolution}
+            </if>
+
+            <if test="unit != null and unit != ''">
+                AND unit = #{unit}
+            </if>
+        </where>
+
+        ORDER BY created_at DESC
+    </select>
+
+</mapper>

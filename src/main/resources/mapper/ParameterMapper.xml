@@ -5,118 +5,89 @@
 
 <mapper namespace="com.example.lazarus_backend00.dao.ParameterDao">
 
-    <!-- 插入 Parameter -->
-    <insert id="insertParameter"
+    <resultMap id="BaseResultMap" type="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity">
+        <id column="id" property="id" />
+        <result column="interfaceId" property="interfaceId" />
+        <result column="ioType" property="ioType" />
+        <result column="tensorOrder" property="tensorOrder" />
+        <result column="originPoint" property="originPoint" typeHandler="com.example.lazarus_backend00.infrastructure.config.JtsGeometryTypeHandler"/>
+        <result column="coverageGeom" property="coverageGeom" typeHandler="com.example.lazarus_backend00.infrastructure.config.JtsGeometryTypeHandler"/>
+        <result column="createdAt" property="createdAt" />
+        <result column="updatedAt" property="updatedAt" />
+    </resultMap>
+
+    <insert id="insert"
             parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity"
             useGeneratedKeys="true"
-            keyProperty="parameterId">
-
+            keyProperty="id">
         INSERT INTO parameter (
-        interface_id,
-        io_type,
-        temporal_resolution_value,
-        temporal_resolution_unit,
-        temporal_range_value,
-        temporal_range_unit,
-        origin_point,
-        row_count,
-        column_count,
-        z_count,
-        spatial_resolution_x,
-        spatial_resolution_y,
-        spatial_resolution_z,
-        spatial_resolution_unit,
-        coverage_geom,
-        created_at,
-        updated_at,
-        tensor_order
-        )
-        VALUES (
-        #{interfaceId},
-        #{ioType},
-        #{temporalResolutionValue},
-        #{temporalResolutionUnit},
-        #{temporalRangeValue},
-        #{temporalRangeUnit},
-
-        ST_GeomFromText(#{originPoint}, 4326),
-
-        #{rowCount},
-        #{columnCount},
-        #{zCount},
-        #{spatialResolutionX},
-        #{spatialResolutionY},
-        #{spatialResolutionZ},
-        #{spatialResolutionUnit},
-
-        <!-- coverage_geom -->
-        <choose>
-            <when test="rowCount == null or columnCount == null">
-                ST_GeomFromText(#{originPoint}, 4326)
-            </when>
-
-            <when test="zCount == null or zCount == 0">
-                ST_MakePolygon(
-                ST_MakeLine(ARRAY[
-                ST_GeomFromText(#{originPoint}, 4326),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, 0),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, -#{rowCount} * #{spatialResolutionY}),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), 0, -#{rowCount} * #{spatialResolutionY}),
-                ST_GeomFromText(#{originPoint}, 4326)
-                ])
-                )
-            </when>
-
-            <otherwise>
-                ST_Force3D(
-                ST_Extrude(
-                ST_MakePolygon(
-                ST_MakeLine(ARRAY[
-                ST_GeomFromText(#{originPoint}, 4326),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, 0),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), #{columnCount} * #{spatialResolutionX}, -#{rowCount} * #{spatialResolutionY}),
-                ST_Translate(ST_GeomFromText(#{originPoint}, 4326), 0, -#{rowCount} * #{spatialResolutionY}),
-                ST_GeomFromText(#{originPoint}, 4326)
-                ])
-                ),
-                #{zCount} * #{spatialResolutionZ}
-                )
-                )
-            </otherwise>
-        </choose>,
-
-        #{createdAt},
-        #{updatedAt},
-        #{tensorOrder}
-        )
-    </insert>
-
-    <!-- 根据 ID 查询 Parameter -->
-    <select id="selectById"
-            parameterType="int"
-            resultType="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity">
-        SELECT
-            parameter_id,
             interface_id,
             io_type,
-            temporal_resolution_value,
-            temporal_resolution_unit,
-            temporal_range_value,
-            temporal_range_unit,
-            ST_AsText(origin_point) AS origin_point,
-            row_count,
-            column_count,
-            z_count,
-            spatial_resolution_x,
-            spatial_resolution_y,
-            spatial_resolution_z,
-            spatial_resolution_unit,
-            ST_AsText(coverage_geom) AS coverage_geom,
+            origin_point,
+            coverage_geom,
+            tensor_order,
             created_at,
-            updated_at,
-            tensor_order
+            updated_at
+        )
+        VALUES (
+                   #{interfaceId},
+                   #{ioType},
+                   #{originPoint},
+                   #{coverageGeom},
+                   #{tensorOrder},
+                   #{createdAt},
+                   #{updatedAt}
+               )
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT
+            id,
+            interface_id  AS interfaceId,
+            io_type       AS ioType,
+            tensor_order  AS tensorOrder,
+
+            ST_AsBinary(origin_point)  AS originPoint,
+            ST_AsBinary(coverage_geom) AS coverageGeom,
+
+            created_at    AS createdAt,
+            updated_at    AS updatedAt
         FROM parameter
-        WHERE parameter_id = #{parameterId}
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByCondition" parameterType="com.example.lazarus_backend00.infrastructure.persistence.entity.ParameterEntity" resultMap="BaseResultMap">
+        SELECT
+        id,
+        interface_id  AS interfaceId,
+        io_type       AS ioType,
+        tensor_order  AS tensorOrder,
+
+        ST_AsBinary(origin_point)  AS originPoint,
+        ST_AsBinary(coverage_geom) AS coverageGeom,
+
+        created_at    AS createdAt,
+        updated_at    AS updatedAt
+        FROM parameter
+        <where>
+            <if test="id != null">
+                AND id = #{id}
+            </if>
+            <if test="interfaceId != null">
+                AND interface_id = #{interfaceId}
+            </if>
+            <if test="ioType != null and ioType != ''">
+                AND io_type = #{ioType}
+            </if>
+            <if test="tensorOrder != null and tensorOrder != ''">
+                AND tensor_order = #{tensorOrder}
+            </if>
+
+            <if test="coverageGeom != null">
+                AND ST_Intersects(coverage_geom, #{coverageGeom})
+            </if>
+        </where>
+        ORDER BY created_at DESC
     </select>
 
 </mapper>

@@ -1,0 +1,52 @@
+@startuml
+
+class OnnxModelContainer {
+    - containerId: int
+    - version: String
+    - modelFilePath: String
+    - parameterList: List<Parameter>
+
+    - status: AtomicReference<ContainerStatus>
+    - runtimeMemoryUsage: AtomicInteger
+
+    - env: OrtEnvironment
+    - session: OrtSession
+
+    + OnnxModelContainer(containerId: int, version: String,
+      modelFilePath: String, parameterList: List<Parameter>)
+
+    + load(): boolean
+    + unload(): boolean
+    + run(inputData: TSDataBlock): TSDataBlock
+
+    + getContainerId(): int
+    + getVersion(): String
+    + getParameterList(): List<Parameter>
+    + getStatus(): ContainerStatus
+    + getMemoryUsage(): int
+
+    - extractFlatFloatArrayFromNc(data: TSDataBlock): float[]
+    - packToNetCdfOutput(flatOutput: float[],
+      shape: long[], metadata: TSDataBlock): TSDataBlock
+}
+
+interface ModelContainer
+class Parameter
+class TSDataBlock
+enum ContainerStatus
+
+class OrtEnvironment
+class OrtSession
+class OnnxTensor
+
+OnnxModelContainer ..|> ModelContainer
+
+OnnxModelContainer ..> Parameter
+OnnxModelContainer ..> TSDataBlock
+OnnxModelContainer ..> ContainerStatus
+
+OnnxModelContainer ..> OrtEnvironment
+OnnxModelContainer ..> OrtSession
+OnnxModelContainer ..> OnnxTensor
+
+@enduml

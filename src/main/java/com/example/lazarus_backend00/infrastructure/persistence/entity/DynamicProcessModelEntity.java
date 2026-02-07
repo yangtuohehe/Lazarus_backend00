@@ -1,30 +1,39 @@
 package com.example.lazarus_backend00.infrastructure.persistence.entity;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import java.time.LocalDateTime;
 
 /**
  * 数据表 dynamic_process_model 的数据库映射对象
- * 修改：model_filePath -> modelFile，类型改为 byte[] 支持 ONNX 文件存储
  */
 public class DynamicProcessModelEntity {
 
-    private Integer processmodelId;
+    // 1. 符合 Java 规范的小写 id
+    private Integer id;
+
     private String modelName;
     private String modelSourcePaper;
     private String modelAuthor;
     private String modelSummary;
+    private Integer version;
+
+    // 2. 修改：支持 ONNX 文件存储
     private byte[] modelFile;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime createdAt;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime updatedAt;
 
-    // -------- getter / setter --------
+    // -------- getter / setter (标准命名) --------
 
-    public Integer getProcessmodelId() {
-        return processmodelId;
+    // 修改：getId 代替 getProcessmodelId
+    public Integer getId() {
+        return id;
     }
 
-    public void setProcessmodelId(Integer processmodelId) {
-        this.processmodelId = processmodelId;
+    public void setId(Integer id) {
+        this.id = id;
     }
 
     public String getModelName() {
@@ -67,7 +76,6 @@ public class DynamicProcessModelEntity {
         this.modelFile = modelFile;
     }
 
-
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -82,5 +90,13 @@ public class DynamicProcessModelEntity {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Integer getVersion() {
+        return version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version;
     }
 }

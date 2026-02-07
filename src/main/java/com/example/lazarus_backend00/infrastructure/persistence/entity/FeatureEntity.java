@@ -7,25 +7,19 @@ import java.time.LocalDateTime;
  */
 public class FeatureEntity {
 
-    private Integer featureId;
+    private Integer id;
     private String featureName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    /** 对应 parameter 表的外键 */
-    private Integer parameterId;
+    // ---------- getter / setter (修正为标准命名) ----------
 
-    /** feature 对应的张量维度索引 */
-    private Integer dimensionIndex;
-
-    // ---------- getter / setter ----------
-
-    public Integer getFeatureId() {
-        return featureId;
+    public Integer getId() {
+        return id;
     }
 
-    public void setFeatureId(Integer featureId) {
-        this.featureId = featureId;
+    public void setId(Integer id) {
+        this.id = id;
     }
 
     public String getFeatureName() {
@@ -50,21 +44,5 @@ public class FeatureEntity {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
-    }
-
-    public Integer getParameterId() {
-        return parameterId;
-    }
-
-    public void setParameterId(Integer parameterId) {
-        this.parameterId = parameterId;
-    }
-
-    public Integer getDimensionIndex() {
-        return dimensionIndex;
-    }
-
-    public void setDimensionIndex(Integer dimensionIndex) {
-        this.dimensionIndex = dimensionIndex;
     }
 }
