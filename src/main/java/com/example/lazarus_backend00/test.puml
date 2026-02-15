@@ -1,52 +1,33 @@
-@startuml
+sequenceDiagram
+    participant Clock as GlobalClock
+    participant SubSys as DataSubsystem (Service)
+    participant MainAPI as SystemIntegration (Controller)
+    participant DataSvc as DataService
+    participant Trigger as ModelEventTrigger
+    participant Orch as Orchestrator
+    participant Pool as ContainerPool
+    participant SubAPI as DataSubsystem (Controller)
+    participant Storage as DataStorage
 
-class OnnxModelContainer {
-    - containerId: int
-    - version: String
-    - modelFilePath: String
-    - parameterList: List<Parameter>
+    Note over Clock, Storage: Phase 1: Data Generation
+    Clock->>SubSys: 1. Tick (Event)
+    SubSys->>SubSys: 2. Copy TIF (Generate Real Data)
+    SubSys->>MainAPI: 3. HTTP POST /notify-arrival
 
-    - status: AtomicReference<ContainerStatus>
-    - runtimeMemoryUsage: AtomicInteger
+    Note over MainAPI, Pool: Phase 2: Compute
+    MainAPI->>DataSvc: 4. notifyDataArrival()
+    DataSvc->>Trigger: 5. onDataUpdate(State=1)
+    Trigger->>Orch: 6. Return Tasks
+    Orch->>DataSvc: 7. Fetch Input Data
+    DataSvc->>SubAPI: 8. HTTP POST /fetch
+    SubAPI-->>DataSvc: Return DataBlock
+    Orch->>Pool: 9. executeModel()
+    Pool-->>Orch: Return ResultBlock
 
-    - env: OrtEnvironment
-    - session: OrtSession
-
-    + OnnxModelContainer(containerId: int, version: String,
-      modelFilePath: String, parameterList: List<Parameter>)
-
-    + load(): boolean
-    + unload(): boolean
-    + run(inputData: TSDataBlock): TSDataBlock
-
-    + getContainerId(): int
-    + getVersion(): String
-    + getParameterList(): List<Parameter>
-    + getStatus(): ContainerStatus
-    + getMemoryUsage(): int
-
-    - extractFlatFloatArrayFromNc(data: TSDataBlock): float[]
-    - packToNetCdfOutput(flatOutput: float[],
-      shape: long[], metadata: TSDataBlock): TSDataBlock
-}
-
-interface ModelContainer
-class Parameter
-class TSDataBlock
-enum ContainerStatus
-
-class OrtEnvironment
-class OrtSession
-class OnnxTensor
-
-OnnxModelContainer ..|> ModelContainer
-
-OnnxModelContainer ..> Parameter
-OnnxModelContainer ..> TSDataBlock
-OnnxModelContainer ..> ContainerStatus
-
-OnnxModelContainer ..> OrtEnvironment
-OnnxModelContainer ..> OrtSession
-OnnxModelContainer ..> OnnxTensor
-
-@enduml
+    Note over Orch, Storage: Phase 3: Return & Loop
+    Orch->>DataSvc: 10. pushData(ResultBlock)
+    DataSvc->>DataSvc: 11. Cache Put
+    DataSvc->>SubAPI: 12. HTTP POST /ingest-calc
+    SubAPI->>Storage: 13. Write "-ls.tif" to Disk
+    DataSvc->>Trigger: 14. onDataUpdate(State=2)
+    Trigger-->>Orch: 15. New Tasks (Cascade...)

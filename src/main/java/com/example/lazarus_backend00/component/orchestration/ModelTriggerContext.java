@@ -1,22 +1,30 @@
 package com.example.lazarus_backend00.component.orchestration;
 
 import com.example.lazarus_backend00.component.container.Parameter;
-import com.example.lazarus_backend00.domain.axis.Feature; // 假设 Feature 类在此包
+import com.example.lazarus_backend00.domain.axis.Feature;
 import com.example.lazarus_backend00.domain.data.TSShell;
 import com.example.lazarus_backend00.domain.data.TSShellFactory;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 模型触发状态上下文 (ModelTriggerContext) - 层级任务适配版
- * 职责：
- * 1. 维护特定模型的水位线 (Watermark)。
- * 2. 运行 UDCR (倒序搜索) 算法判断是否触发计算。
- * 3. 构造层级化的 ExecutableTask (TaskPort -> List<TSShell>)。
- * Access: Package-Private
+ * 模型触发状态上下文 (ModelTriggerContext)
+ *
+ * <p>状态定义 (Update Semantics):
+ * <ul>
+ * <li>0: 空缺 (Missing) - 无数据。</li>
+ * <li>1: 存在 (Has Data) - 内部存储状态，表示该时刻数据就绪 (无论是实测还是模拟)。</li>
+ * </ul>
+ *
+ * <p>输入信号定义 (Input Signal):
+ * <ul>
+ * <li>Signal 1 (New): 仅当当前为 0 时触发更新。</li>
+ * <li>Signal 2 (Replace): 强制触发更新 (触发 UDCR)。</li>
+ * </ul>
  */
 class ModelTriggerContext {
 
@@ -25,49 +33,37 @@ class ModelTriggerContext {
     private final List<Parameter> inputParameters;
     private final List<Parameter> outputParameters;
     private final Duration timeStep;
-
-    // 缓存所有输入特征 ID (用于 checkInputIntegrity 快速查表)
-    // 注意：一个 Parameter 可能包含多个 Feature，这里存储平铺后的所有 ID
+    private final Duration inputWindow;
     private final List<Integer> inputFeatureIds;
 
     // ================== 动态状态 ==================
     private Instant modelLastComputedTime;
 
-    // 内存倒排索引：FeatureID -> 该特征数据的最新时间水位
-    private final Map<Integer, Instant> featureLatestTimeMap = new HashMap<>();
+    // Key: FeatureID -> Value: (TimeSlot -> State[0=Missing, 1=HasData])
+    // 注意：内部 Map 不再区分实测/模拟，只存 1 表示有数据。区分逻辑在 update 时处理。
+    private final Map<Integer, Map<Instant, Integer>> featureStateMap = new ConcurrentHashMap<>();
 
-    // 线程安全的 ID 生成器
     private static final AtomicLong taskIdGenerator = new AtomicLong(0);
 
-    /**
-     * 构造函数
-     */
-    public ModelTriggerContext(int modelId,
-                               List<Parameter> allParameters,
-                               Duration timeStep,
-                               Instant initialTime) {
+    public ModelTriggerContext(int modelId, List<Parameter> allParameters, Duration timeStep, Duration inputWindow, Instant initialTime) {
         this.modelId = modelId;
         this.timeStep = timeStep;
+        this.inputWindow = (inputWindow != null) ? inputWindow : timeStep;
         this.modelLastComputedTime = initialTime.minus(timeStep);
 
         this.inputParameters = new ArrayList<>();
         this.outputParameters = new ArrayList<>();
         this.inputFeatureIds = new ArrayList<>();
 
-        // 1. 分类参数并初始化水位
         for (Parameter p : allParameters) {
             if ("INPUT".equalsIgnoreCase(p.getIoType())) {
                 this.inputParameters.add(p);
-
-                // 🔥 修正：必须监听 Parameter 中的【所有】特征，而不仅仅是第一个
                 if (p.getFeatureList() != null) {
                     for (Feature f : p.getFeatureList()) {
                         this.inputFeatureIds.add(f.getId());
-                        // 初始化水位为最小时间
-                        this.featureLatestTimeMap.put(f.getId(), Instant.MIN);
+                        this.featureStateMap.put(f.getId(), new ConcurrentHashMap<>());
                     }
                 }
-
             } else if ("OUTPUT".equalsIgnoreCase(p.getIoType())) {
                 this.outputParameters.add(p);
             }
@@ -75,64 +71,110 @@ class ModelTriggerContext {
     }
 
     public int getModelId() { return modelId; }
-
-    public List<Integer> getInputFeatureIds() {
-        return Collections.unmodifiableList(inputFeatureIds);
-    }
+    public List<Integer> getInputFeatureIds() { return Collections.unmodifiableList(inputFeatureIds); }
 
     /**
      * 处理数据更新信号
+     * @param dataState 1:新增(New), 2:替换(Replace)
      */
-    public synchronized List<ExecutableTask> processUpdate(TSShell dataShell, Instant globalTNow) {
+    public synchronized List<ExecutableTask> processUpdate(TSShell dataShell, int dataState, Instant globalTNow) {
         int fid = dataShell.getFeatureId();
-        Instant currentMax = featureLatestTimeMap.getOrDefault(fid, Instant.MIN);
 
-        // 1. 更新特征水位 (Watermark Advancement)
-        if (dataShell.getTEnd().isAfter(currentMax)) {
-            featureLatestTimeMap.put(fid, dataShell.getTEnd());
+        // 1. 根据信号类型 (New vs Replace) 更新状态机
+        // 返回最早发生"有效变更"的时间点
+        Instant earliestChangeTime = updateStateAndGetChangeTime(fid, dataShell, dataState);
+
+        if (earliestChangeTime == null) {
+            return Collections.emptyList(); // 无有效变更 (例如信号是1但已有数据)
         }
 
-        // 2. 仿真时间回退处理
-        if (globalTNow.isBefore(modelLastComputedTime)) {
-            System.out.println("🔄 [Context] 时间回退，重置模型 " + modelId + " 状态");
-            this.modelLastComputedTime = globalTNow.minus(timeStep);
+        // 2. 确定搜索截止时间 (Search Limit)
+        Instant searchLimit;
+        if (earliestChangeTime.isBefore(modelLastComputedTime)) {
+            // 发生了历史数据的填补(1) 或 修正(2)，需要回溯
+            searchLimit = earliestChangeTime.minus(timeStep);
+            System.out.println(String.format("⚡ [回溯触发] 模型%d 感知到数据变更 @ %s (Signal=%d). 回溯至: %s",
+                    modelId, earliestChangeTime, dataState, searchLimit));
+        } else {
+            searchLimit = modelLastComputedTime;
         }
 
-        // 3. 执行核心反向搜索算法
-        return runUDCR(dataShell, globalTNow);
+        // 3. 执行 UDCR
+        return runUDCR(dataShell, globalTNow, searchLimit);
     }
 
     /**
-     * UDCR (Upstream Data Coverage Reverse-search) 算法
+     * 🔥 核心逻辑变更：状态更新状态机
+     *
+     * @param signalType 1:新增, 2:替换
+     * @return 最早发生有效变更的时间，如果无变更返回 null
      */
-    private List<ExecutableTask> runUDCR(TSShell triggerSourceShell, Instant tNow) {
-        List<Instant> validTimePoints = new ArrayList<>();
+    private Instant updateStateAndGetChangeTime(int fid, TSShell shell, int signalType) {
+        Map<Instant, Integer> timeSlots = featureStateMap.get(fid);
+        if (timeSlots == null) return null;
 
+        Instant start = alignTime(shell.getTOrigin(), timeStep);
+        Instant end = alignTime(shell.getTEnd(), timeStep);
+
+        Instant earliestChange = null;
+
+        for (Instant t = start; !t.isAfter(end); t = t.plus(timeStep)) {
+            Integer oldState = timeSlots.getOrDefault(t, 0); // 0:空缺, 1:有数据
+
+            boolean effectiveChange = false;
+
+            // === 逻辑分支 ===
+
+            // Scenario A: 信号为 1 (新增)
+            // 只有当坑是空的 (old=0) 时，才视为变更。
+            // 如果 old=1，说明已有数据 (不管之前是模拟还是实测)，忽略此信号。
+            if (signalType == 1) {
+                if (oldState == 0) {
+                    effectiveChange = true;
+                }
+            }
+
+            // Scenario B: 信号为 2 (替换/修正)
+            // 无论坑里有没有水，都强制视为变更。
+            // 目的：强制返回 earliestChangeTime，从而触发 UDCR 重算。
+            else if (signalType == 2) {
+                effectiveChange = true;
+            }
+
+            // === 执行更新 ===
+            if (effectiveChange) {
+                // 内部状态统一存为 1 (表示数据就绪)，不区分实测/模拟
+                timeSlots.put(t, 1);
+
+                if (earliestChange == null || t.isBefore(earliestChange)) {
+                    earliestChange = t;
+                }
+            }
+        }
+        return earliestChange;
+    }
+
+    private List<ExecutableTask> runUDCR(TSShell triggerShell, Instant tNow, Instant searchLimit) {
+        List<Instant> validTimePoints = new ArrayList<>();
         Instant p = alignTime(tNow, timeStep);
-        Instant searchLimit = modelLastComputedTime;
 
         while (p.isAfter(searchLimit)) {
-            // A. 完整性检查 (Integrity Check)
-            // 必须所有输入特征的数据都覆盖到了 p+step，才能计算
+            // 完整性检查：只要状态为 1 (有数据) 即可，不关心来源
             if (!checkInputIntegrity(p)) {
                 p = p.minus(timeStep);
                 continue;
             }
 
-            // B. 必要性检查 (Necessity Check)
-            if (checkValueNecessity(p, triggerSourceShell)) {
+            if (checkDependencyNecessity(p, triggerShell)) {
                 validTimePoints.add(p);
             }
-
             p = p.minus(timeStep);
         }
 
         Collections.sort(validTimePoints);
-
         List<ExecutableTask> tasks = new ArrayList<>();
         for (Instant executeTime : validTimePoints) {
             tasks.add(createTask(executeTime));
-
             if (executeTime.isAfter(modelLastComputedTime)) {
                 modelLastComputedTime = executeTime;
             }
@@ -140,78 +182,58 @@ class ModelTriggerContext {
         return tasks;
     }
 
-    // ================== 检查逻辑 ==================
-
     private boolean checkInputIntegrity(Instant p) {
-        Instant requiredEnd = p.plus(timeStep);
-        // 遍历所有被监听的 Input Feature ID
+        Instant windowStart = p.minus(inputWindow);
+        Instant windowEnd = p;
+
         for (Integer inputId : inputFeatureIds) {
-            Instant latest = featureLatestTimeMap.get(inputId);
-            // 如果某个特征没被初始化(null)或者水位不够
-            if (latest == null || latest.isBefore(requiredEnd)) {
-                return false;
+            Map<Instant, Integer> slots = featureStateMap.get(inputId);
+            for (Instant t = windowStart; !t.isAfter(windowEnd); t = t.plus(timeStep)) {
+                // 只要状态 > 0 即视为数据就绪
+                if (slots.getOrDefault(t, 0) == 0) {
+                    return false;
+                }
             }
         }
         return true;
     }
 
-    private boolean checkValueNecessity(Instant p, TSShell triggerShell) {
-        if (p.isAfter(modelLastComputedTime)) return true;
-        Instant pEnd = p.plus(timeStep);
-        return !triggerShell.getTOrigin().isAfter(pEnd) && !triggerShell.getTEnd().isBefore(p);
+    private boolean checkDependencyNecessity(Instant p, TSShell triggerShell) {
+        Instant taskInputStart = p.minus(inputWindow);
+        Instant taskInputEnd = p.plus(timeStep);
+        Instant dataStart = triggerShell.getTOrigin();
+        Instant dataEnd = triggerShell.getTEnd();
+        Instant intersectStart = taskInputStart.isAfter(dataStart) ? taskInputStart : dataStart;
+        Instant intersectEnd = taskInputEnd.isBefore(dataEnd) ? taskInputEnd : dataEnd;
+        return intersectStart.isBefore(intersectEnd);
     }
-
-    // ================== 任务生成 (核心重构) ==================
 
     private ExecutableTask createTask(Instant executeTime) {
         long taskId = taskIdGenerator.incrementAndGet();
-
-        // 1. 构建输入端口列表 (List<TaskPort>)
         List<ExecutableTask.TaskPort> inputPorts = new ArrayList<>();
-
         for (Parameter param : inputParameters) {
-            // 这里的 param 代表模型的一个输入张量 (e.g. Temperature + Humidity)
             List<TSShell> shellsForThisPort = new ArrayList<>();
-
             if (param.getFeatureList() != null) {
-                // 遍历该张量所需的每个特征，生成独立的 Shell
                 for (Feature f : param.getFeatureList()) {
-                    // 使用 Factory 生成单特征外壳
                     TSShell shell = TSShellFactory.createFromParameter(f.getId(), executeTime, param);
                     shellsForThisPort.add(shell);
                 }
             }
-
-            // 打包成一个端口 (Port)
             inputPorts.add(new ExecutableTask.TaskPort(param.getTensorOrder(), shellsForThisPort));
         }
-
-        // 2. 构建输出端口列表 (List<TaskPort>)
         List<ExecutableTask.TaskPort> outputPorts = new ArrayList<>();
-
         for (Parameter param : outputParameters) {
             List<TSShell> shellsForThisPort = new ArrayList<>();
-
             if (param.getFeatureList() != null) {
                 for (Feature f : param.getFeatureList()) {
                     TSShell shell = TSShellFactory.createFromParameter(f.getId(), executeTime, param);
                     shellsForThisPort.add(shell);
                 }
             }
-
             outputPorts.add(new ExecutableTask.TaskPort(param.getTensorOrder(), shellsForThisPort));
         }
-
-        // 3. 返回新的层级化任务对象
-        return new ExecutableTask(
-                taskId,
-                this.modelId,
-                inputPorts,  // List<TaskPort>
-                outputPorts  // List<TaskPort>
-        );
+        return new ExecutableTask(taskId, this.modelId, inputPorts, outputPorts);
     }
-
-    // ================== 工具方法 ==================
 
     private Instant alignTime(Instant time, Duration step) {
         long stepMillis = step.toMillis();
