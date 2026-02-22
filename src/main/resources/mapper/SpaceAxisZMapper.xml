@@ -12,6 +12,7 @@
 
         INSERT INTO space_axis_z (
             parameter_id,
+            dimension_index,
             count,
             resolution,
             unit,
@@ -20,6 +21,7 @@
         )
         VALUES (
                    #{parameterId},
+                   #{dimensionIndex},
                    #{count},
                    #{resolution},
                    #{unit},
@@ -33,10 +35,14 @@
 
         SELECT
             id,
-            parameter_id    AS parameterId,  count,
+            parameter_id    AS parameterId,
+            dimension_index AS dimensionIndex,
+            count,
             resolution,
             unit,
-            created_at      AS createdAt,    updated_at      AS updatedAt     FROM space_axis_z
+            created_at      AS createdAt,
+            updated_at      AS updatedAt
+        FROM space_axis_z
         WHERE id = #{id}
     </select>
 
@@ -45,7 +51,9 @@
 
         SELECT
             id,
-            parameter_id    AS parameterId,  count,
+            parameter_id    AS parameterId,
+            dimension_index AS dimensionIndex,
+            count,
             resolution,
             unit,
             created_at      AS createdAt,
@@ -60,7 +68,9 @@
 
         SELECT
         id,
-        parameter_id    AS parameterId,  count,
+        parameter_id    AS parameterId,
+        dimension_index AS dimensionIndex,
+        count,
         resolution,
         unit,
         created_at      AS createdAt,
@@ -72,6 +82,9 @@
             </if>
             <if test="parameterId != null">
                 AND parameter_id = #{parameterId}
+            </if>
+            <if test="dimensionIndex != null">
+                AND dimension_index = #{dimensionIndex}
             </if>
             <if test="count != null">
                 AND count = #{count}

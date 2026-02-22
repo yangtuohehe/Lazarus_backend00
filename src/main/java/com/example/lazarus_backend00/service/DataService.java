@@ -2,35 +2,35 @@ package com.example.lazarus_backend00.service;
 
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
 import com.example.lazarus_backend00.domain.data.TSShell;
+import com.example.lazarus_backend00.dto.subdto.DataUpdatePacket; // 确保引用了正确的 DTO
+
+import java.util.List;
 
 /**
- * 数据服务接口 (Service Layer Interface)
- * 职责：作为系统的核心数据总线，负责数据的 注入(Push) 和 查询(Fetch)。
+ * 数据服务接口 (Core Data Bus)
  */
 public interface DataService {
 
     /**
-     * 【写入口】外部数据注入
-     * 将标准化后的数据块推入系统。
-     * 行为：
-     * 1. 将数据存入高速缓存 (Pre-loading)。
-     * 2. (可选) 异步持久化到数据库。
-     * 3. 通知模型触发器 (EventTrigger) 有新数据到达。
-     *
-     * @param featureId 特征 ID (如 101)
-     * @param dataBlock 标准数据块 (包含真实数据)
+     * 【写入口】外部数据注入 / 结果回写
+     * 1. 存入本地缓存
+     * 2. (如果是结果) 发送给数据子系统存盘
+     * 3. 触发内部级联计算 (Status=2)
      */
     void pushData(int featureId, TSDataBlock dataBlock);
 
     /**
-     * 【读入口】容器数据查询
-     * 模型容器在计算前调用此接口获取输入数据。
-     * 行为：
-     * 1. 优先查找高速缓存 (Cache Hit)。
-     * 2. (可选) 缓存未命中则查询数据库 (Cache Miss)。
-     *
-     * @param requirementShell 包含所需的时间、空间范围的元数据外壳
-     * @return 完整的数据块，如果未找到则返回 null
+     * 【读入口】获取数据
+     * 1. 查本地缓存
+     * 2. 缓存未命中 -> HTTP 请求数据子系统
      */
     TSDataBlock fetchData(TSShell requirementShell);
+
+    /**
+     * 【通知入口】处理来自数据子系统的批量通知
+     * 1. 解析数据包
+     * 2. 触发 EventTrigger
+     * 3. 驱动 Orchestrator 执行任务
+     */
+    void notifyDataArrivals(List<DataUpdatePacket> packets);
 }

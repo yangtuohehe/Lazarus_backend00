@@ -37,10 +37,10 @@ public class ModelRegisterIntegrationTest {
         // ==========================================
 
         // 【开关】true = 读取外部 JSON 文件; false = 使用下方代码中的 JSON 字符串
-        boolean USE_EXTERNAL_JSON = false;
+        boolean USE_EXTERNAL_JSON = true;
 
         // 1. ONNX 模型文件路径 (必填)
-        String modelFilePath = "D:\\CODE\\project\\Lazarus\\Lazarus-数据处理\\output\\v\\seqLen01_lead36.onnx";
+        String modelFilePath = "D:\\CODE\\project\\Lazarus\\Lazarus-数据处理\\output\\tem\\seqLen24_lead12.onnx";
 
         // 2. 外部 JSON 文件路径 (仅当 USE_EXTERNAL_JSON = true 时生效)
         // 你可以将前端发送的请求 Body 保存为 .json 文件放在这里
