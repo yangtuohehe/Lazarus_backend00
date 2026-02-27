@@ -1,47 +1,29 @@
 package com.example.lazarus_backend00.infrastructure.config;
 
-import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
-/**
- * 映射 application.yml 中的 lazarus.model-pool 配置
- */
 @Component
-@ConfigurationProperties(prefix = "model-pool")
+@ConfigurationProperties(prefix = "lazarus.model-pool") // 确保这里的 prefix 和 properties 中一致
 public class ModelPoolConfig {
 
-    /** 最大并发数 (默认4) */
     private int maxConcurrentRuns = 4;
-
-    /** 最大内存 MB (默认4GB) */
-    private long maxMemoryMb = 400;
-
-    public int getMaxConcurrentRuns() {
-        return maxConcurrentRuns;
-    }
-
-    public void setMaxConcurrentRuns(int maxConcurrentRuns) {
-        this.maxConcurrentRuns = maxConcurrentRuns;
-    }
-
-    public long getMaxMemoryMb() {
-        return maxMemoryMb;
-    }
-
-    public void setMaxMemoryMb(long maxMemoryMb) {
-        this.maxMemoryMb = maxMemoryMb;
-    }
-
-    public int getWaitTimeoutSeconds() {
-        return waitTimeoutSeconds;
-    }
-
-    public void setWaitTimeoutSeconds(int waitTimeoutSeconds) {
-        this.waitTimeoutSeconds = waitTimeoutSeconds;
-    }
-
-    /** 排队等待超时时间 (默认5分钟) */
+    private long maxMemoryMb = 8192;
     private int waitTimeoutSeconds = 300;
+
+    // 🔥 新增：最小可用内存阈值 (默认 2000 MB)
+    private long minFreeMemoryMb = 2000;
+
+    public int getMaxConcurrentRuns() { return maxConcurrentRuns; }
+    public void setMaxConcurrentRuns(int maxConcurrentRuns) { this.maxConcurrentRuns = maxConcurrentRuns; }
+
+    public long getMaxMemoryMb() { return maxMemoryMb; }
+    public void setMaxMemoryMb(long maxMemoryMb) { this.maxMemoryMb = maxMemoryMb; }
+
+    public int getWaitTimeoutSeconds() { return waitTimeoutSeconds; }
+    public void setWaitTimeoutSeconds(int waitTimeoutSeconds) { this.waitTimeoutSeconds = waitTimeoutSeconds; }
+
+    // 🔥 新增 Getter 和 Setter
+    public long getMinFreeMemoryMb() { return minFreeMemoryMb; }
+    public void setMinFreeMemoryMb(long minFreeMemoryMb) { this.minFreeMemoryMb = minFreeMemoryMb; }
 }

@@ -84,34 +84,27 @@ public class DataServiceImpl implements DataService {
     // =================================================================
     @Override
     public void pushData(int featureId, TSDataBlock dataBlock) {
-        // 1. 生成缓存 Key 并存入本地 (Pre-load for downstream)
-        String key = generateKey(featureId, dataBlock.getTOrigin().getEpochSecond());
-        dataCache.put(key, dataBlock);
-
-        // 2. 【远程归档】 发送给数据子系统存盘
+        // 1. 远程归档：直接发送给数据子系统存盘
         try {
-            // 发送 HTTP 请求 (模拟远程 IO)
-            // 注意：这里可能会有序列化性能开销，生产环境可优化为异步
             restTemplate.postForObject(SUBSYSTEM_INGEST_URL, dataBlock, String.class);
-            // log.debug("    💾 [Archived] 结果已归档至子系统: Feature {}", featureId);
         } catch (Exception e) {
             log.error("❌ [Archive Failed] 归档失败: {}", e.getMessage());
         }
 
-        // 3. 【级联触发】 内部 Self-Trigger
-        // 从 Block 提取 Shell
+        // 2. 级联触发：从 Block 提取 Shell
         TSShell shell = extractShellFromBlock(featureId, dataBlock);
 
-        // 状态固定为 2 (模拟数据)
+        // 3. 触发下游模型 (状态固定为 2：模拟数据)
         List<ExecutableTask> tasks = eventTrigger.onDataUpdate(shell, 2);
 
-        // 4. 驱动下游任务
         if (!tasks.isEmpty()) {
             log.info("    🌊 [Cascade] 仿真结果 F{} 级联触发 {} 个新任务", featureId, tasks.size());
             for (ExecutableTask task : tasks) {
                 orchestratorService.dispatchTask(task);
             }
         }
+
+        // 方法结束，dataBlock 将在调用链结束后被 JVM 自动回收
     }
 
     // =================================================================
@@ -119,43 +112,17 @@ public class DataServiceImpl implements DataService {
     // =================================================================
     @Override
     public TSDataBlock fetchData(TSShell requirementShell) {
-        // 1. 生成 Key
-        String key = generateKey(
-                requirementShell.getFeatureId(),
-                requirementShell.getTOrigin().getEpochSecond()
-        );
-
-        // 2. 查一级缓存 (Cache Hit)
-        TSDataBlock cachedBlock = dataCache.getIfPresent(key);
-        if (cachedBlock != null) {
-            return cachedBlock;
-        }
-
-        // 3. 缓存未命中 -> 远程 Fetch (Cache Miss)
-        // log.warn("    ⚠️ [Cache Miss] Fetching from Subsystem: {}", key);
         try {
-            // 调用数据子系统的 Fetch 接口
-            // 假设接口接受 List<TSShell> 返回 List<TSDataBlock>，这里只传一个
-            // 为了简化，这里假设对方有一个接受单个 Shell 的接口，或者我们将 Shell 包装成 List
-            // 实际代码需匹配 SubsystemController 的定义
-
-            // 临时方案：发送 POST 请求获取数据
-            TSDataBlock fetchedBlock = restTemplate.postForObject(
+            // 取消了一级缓存，所有计算所需数据直接向数据系统现用现取
+            return restTemplate.postForObject(
                     SUBSYSTEM_FETCH_URL,
-                    requirementShell, // Request Body
-                    TSDataBlock.class // Response Type
+                    requirementShell,
+                    TSDataBlock.class
             );
-
-            if (fetchedBlock != null) {
-                // 回填缓存
-                dataCache.put(key, fetchedBlock);
-                return fetchedBlock;
-            }
         } catch (Exception e) {
-            log.error("❌ [Fetch Failed] 远程取数失败: {} - {}", key, e.getMessage());
+            log.error("❌ [Fetch Failed] 远程取数失败: {}", e.getMessage());
         }
-
-        return null; // 数据缺失
+        return null;
     }
 
     // ================== 辅助方法 ==================

@@ -1,7 +1,9 @@
 package com.example.lazarus_backend00.service;
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
+import com.example.lazarus_backend00.dto.TaskStatusDTO;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 模型编排服务接口
@@ -9,15 +11,6 @@ import java.time.Instant;
  */
 public interface ModelOrchestratorService {
 
-    /**
-     * [信号入口] 数据变更通知
-     * 当外部数据注入或内部模型计算完成时调用。
-     *
-     * @param featureId 变更的特征ID
-     * @param start 数据起始时间
-     * @param end 数据结束时间
-     */
-    void onDataChanged(int featureId, Instant start, Instant end);
 
     /**
      * [执行入口] 分发单个计算任务
@@ -26,4 +19,6 @@ public interface ModelOrchestratorService {
      * @param task 可执行任务单 (包含 TaskID, ContainerID, I/O定义)
      */
     void dispatchTask(ExecutableTask task);
+    // 🔥 新增：获取当前正在系统中的活跃任务列表
+    List<TaskStatusDTO> getActiveTasks();
 }

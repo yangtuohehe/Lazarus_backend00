@@ -16,7 +16,7 @@ import java.util.Map;
 
 @SpringBootApplication()
 @ComponentScan(basePackages = "com.example")
-public class LazarusBackend00Application {
+public class  LazarusBackend00Application {
 
 	public static void main(String[] args) {
 		SpringApplication.run(LazarusBackend00Application.class, args);

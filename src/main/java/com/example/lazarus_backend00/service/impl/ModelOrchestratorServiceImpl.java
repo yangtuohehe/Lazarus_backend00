@@ -4,6 +4,8 @@ import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
 import com.example.lazarus_backend00.domain.data.TSShell;
+import com.example.lazarus_backend00.dto.TaskStatusDTO;
+import com.example.lazarus_backend00.infrastructure.config.ModelPoolConfig;
 import com.example.lazarus_backend00.service.DataPreloadService;
 import com.example.lazarus_backend00.service.DataService;
 import com.example.lazarus_backend00.service.ModelOrchestratorService;
@@ -16,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -23,67 +26,110 @@ import java.util.stream.Collectors;
 public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
     private static final Logger log = LoggerFactory.getLogger(ModelOrchestratorServiceImpl.class);
-
+    // 🔥 新增：配置类实例
+    private final ModelPoolConfig poolConfig;
     private final DataPreloadService dataPreloadService;
     private final DataService dataService;
     private final ModelContainerPool containerPool;
-
+    private final Object dataMemoryLock = new Object();
     // 注意：不再需要直接依赖 EventTrigger，因为任务是由 DataService 传进来的
+    private final Map<Long, TaskStatusDTO> activeTasksMap = new ConcurrentHashMap<>();
     public ModelOrchestratorServiceImpl(DataPreloadService dataPreloadService,
                                         DataService dataService,
-                                        ModelContainerPool containerPool) {
+                                        ModelContainerPool containerPool,
+                                        ModelPoolConfig poolConfig) {
         this.dataPreloadService = dataPreloadService;
         this.dataService = dataService;
         this.containerPool = containerPool;
+        this.poolConfig = poolConfig;
     }
 
     // ========================================================================
     // 1. 任务分发与执行 (Dispatch & Execute)
     // ========================================================================
 
+
     @Override
-    @Async("taskExecutor") // 异步执行，不阻塞 DataService
+    @Async("taskExecutor")
     public void dispatchTask(ExecutableTask task) {
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();
 
+        // 🌟 1. 初始化任务状态，放入 PENDING
+        TaskStatusDTO statusTracker = new TaskStatusDTO(
+                taskId, runtimeId, "PENDING", Instant.now(), "等待内存准入..."
+        );
+        activeTasksMap.put(taskId, statusTracker);
+
         try {
-            // A. [IO Path] 启动数据预取
-            // 获取任务所需的所有原子 Shell
+            // 🌟 2. 内存准入检查
+            waitForSufficientMemory(taskId, statusTracker);
+
+            // 🌟 3. 更新状态：准备数据
+            statusTracker.setStatus("PREPARING_DATA");
+            statusTracker.setMessage("正在向数据系统索要张量数据...");
+
             List<TSShell> requiredShells = task.getAllInputShells();
             if (!requiredShells.isEmpty()) {
                 dataPreloadService.startFetching(taskId, requiredShells);
             }
-
-            // B. [Rendezvous] 汇合点：等待数据
-            // DataPreloadService 内部会调用 DataService.fetchData (HTTP/Cache)
-            // 设定超时时间 60秒
             List<TSDataBlock> flatInputData = requiredShells.isEmpty()
                     ? new ArrayList<>()
                     : dataPreloadService.getData(taskId, 60);
 
-            // C. [Structure Assembly] 结构组装
-            // 将扁平的 Blocks 组装成容器需要的 List<List<TSDataBlock>> (按张量分组)
             List<List<TSDataBlock>> structuredInputs = assembleInputGroups(task, flatInputData);
 
-            // D. [Compute Path] 执行计算 (进入容器)
-            // executeModel 内部处理了 LRU 和并发锁
+            // 🌟 4. 更新状态：入池计算
+            statusTracker.setStatus("COMPUTING");
+            statusTracker.setMessage("正在容器池内进行计算...");
+
             List<List<TSDataBlock>> structuredResults = containerPool.executeModel(runtimeId, structuredInputs);
 
-            // E. [Result Handling] 结果处理
             if (structuredResults != null && !structuredResults.isEmpty()) {
                 handleResults(task, structuredResults);
             }
 
+            // 🌟 5. 成功完成，从活跃任务表中移除 (前端收到列表不含此任务即代表完成)
+            activeTasksMap.remove(taskId);
+
         } catch (Exception e) {
-            log.error("❌ [Orch] Task-{} (Model {}) 执行失败: {}", taskId, runtimeId, e.getMessage());
-            // e.printStackTrace();
+            log.error("❌ [Orch] Task-{} 执行失败: {}", taskId, e.getMessage());
+            // 发生异常时，保留在列表中展示给前端，状态置为 ERROR
+            statusTracker.setStatus("ERROR");
+            statusTracker.setMessage("执行失败: " + e.getMessage());
+        } finally {
+            System.gc();
+            synchronized (dataMemoryLock) {
+                dataMemoryLock.notifyAll();
+            }
         }
     }
 
-    @Override
-    public void onDataChanged(int featureId, Instant start, Instant end) {
-        // 此方法在当前架构中已弃用，逻辑移至 DataServiceImpl
+    /**
+     * 检查系统内存，不足则挂起当前线程
+     */
+    private void waitForSufficientMemory(long taskId, TaskStatusDTO statusTracker) throws InterruptedException {
+        synchronized (dataMemoryLock) {
+            while (true) {
+                long maxMemory = Runtime.getRuntime().maxMemory();
+                long totalMemory = Runtime.getRuntime().totalMemory();
+                long freeMemory = Runtime.getRuntime().freeMemory();
+                long actualFreeMB = ((maxMemory - totalMemory) + freeMemory) / (1024 * 1024);
+
+                long thresholdMB = poolConfig.getMinFreeMemoryMb();
+
+                if (actualFreeMB >= thresholdMB) {
+                    log.info("🟢 [内存准入] 可用内存 {} MB >= 阈值，Task-{} 获批", actualFreeMB, taskId);
+                    break;
+                }
+
+                // 更新前端展示的排队信息
+                statusTracker.setMessage(String.format("内存不足 (可用 %d MB)，排队中...", actualFreeMB));
+                log.warn("🟡 [内存拦截] 可用内存 {} MB 不足！Task-{} 等待...", actualFreeMB, taskId);
+
+                dataMemoryLock.wait(5000);
+            }
+        }
     }
 
     // ========================================================================
@@ -107,6 +153,12 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
             }
         }
         // log.info("✅ [Orch] Task-{} 完成。", task.getTaskId());
+    }
+    // 🔥 新增：暴露给 Controller 的方法
+    @Override
+    public List<TaskStatusDTO> getActiveTasks() {
+        // 直接返回 Map 中的所有值
+        return new ArrayList<>(activeTasksMap.values());
     }
 
     // ========================================================================

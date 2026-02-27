@@ -20,6 +20,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 数据子系统仿真服务 (Data Subsystem Simulation Service)
@@ -59,11 +60,11 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     // 2. 主系统通信配置
     private static final String URL_MAIN_SYSTEM_NOTIFY = "http://localhost:8080/api/v1/system/integration/notify-batch";
-    private static final int NOTIFY_INTERVAL_MS = 5000; // 通知发送间隔 (毫秒)
+    private static final long NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000L;
     private static final int MAX_BATCH_SIZE = 200;      // 单次 HTTP 请求最大包数量
 
     // 3. 仿真策略配置
-    private static final double PROB_REPLACE_DATA = 0.03; // 替换旧实测数据的概率 (30%)
+    private static final double PROB_REPLACE_DATA = 0.03; // 替换旧实测数据的概率 (3%)
     private static final double PROB_NETWORK_FAIL = 0.05; // 模拟网络丢包/传感器故障概率 (5%)
 
     // 4. 特征源定义 (ERA5 - Daily)

@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Transactional // 测试结束后自动回滚，不污染数据库
+//@Transactional // 测试结束后自动回滚，不污染数据库
 public class ModelRegisterIntegrationTest {
 
     @Autowired
@@ -40,7 +40,7 @@ public class ModelRegisterIntegrationTest {
         boolean USE_EXTERNAL_JSON = true;
 
         // 1. ONNX 模型文件路径 (必填)
-        String modelFilePath = "D:\\CODE\\project\\Lazarus\\Lazarus-数据处理\\output\\tem\\seqLen24_lead12.onnx";
+        String modelFilePath = "D:\\CODE\\project\\Lazarus\\Data\\Meiji(1)-water\\Meiji\\model_meiji\\tem05\\seqLen24_lead12.pt";
 
         // 2. 外部 JSON 文件路径 (仅当 USE_EXTERNAL_JSON = true 时生效)
         // 你可以将前端发送的请求 Body 保存为 .json 文件放在这里
