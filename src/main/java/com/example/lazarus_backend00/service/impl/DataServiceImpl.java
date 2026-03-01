@@ -1,5 +1,6 @@
 package com.example.lazarus_backend00.service.impl;
 
+import com.example.lazarus_backend00.annotation.AuditAnnotations;
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.orchestration.ModelEventTrigger;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
@@ -83,6 +84,7 @@ public class DataServiceImpl implements DataService {
     // 2. 【写逻辑】 仿真结果回写 & 级联触发
     // =================================================================
     @Override
+    @AuditAnnotations.LogDataIngest
     public void pushData(int featureId, TSDataBlock dataBlock) {
         // 1. 远程归档：直接发送给数据子系统存盘
         try {

@@ -5,15 +5,19 @@ import java.time.Instant;
 public class ClockStatusDTO {
     private Instant currentVirtualTime;
     private boolean isRunning;
-    private long stepSizeBytes; // 步长秒数
-    private String stepSizeDesc; // 步长描述 (如 "1 Hour")
+    private long stepSizeBytes;
+    private String stepSizeDesc;
 
-    // 构造函数、Getters、Setters
+    // 🔥 核心修复：添加无参构造函数，解决 JSON 反序列化失败问题
+    public ClockStatusDTO() {
+    }
+
     public ClockStatusDTO(Instant time, boolean running, java.time.Duration step) {
         this.currentVirtualTime = time;
         this.isRunning = running;
-        this.stepSizeBytes = step.getSeconds();
-        this.stepSizeDesc = step.toString();
+        // 增加安全判断，防止极端情况下的 null 传入
+        this.stepSizeBytes = step != null ? step.getSeconds() : 0;
+        this.stepSizeDesc = step != null ? step.toString() : "None";
     }
 
     public Instant getCurrentVirtualTime() {
@@ -29,7 +33,7 @@ public class ClockStatusDTO {
     }
 
     public void setRunning(boolean running) {
-        isRunning = running;
+        this.isRunning = running;
     }
 
     public long getStepSizeBytes() {

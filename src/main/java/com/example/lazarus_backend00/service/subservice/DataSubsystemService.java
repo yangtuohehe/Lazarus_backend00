@@ -3,6 +3,8 @@ package com.example.lazarus_backend00.service.subservice;
 import java.time.Instant;
 
 import com.example.lazarus_backend00.component.clock.VirtualTimeTickEvent;
+import com.example.lazarus_backend00.domain.data.TSDataBlock;
+
 import java.time.Instant;
 
 /**
@@ -29,4 +31,6 @@ public interface DataSubsystemService {
      * @param currentSystemTime 当前虚拟系统时间
      */
     void executeIngestion(Instant currentSystemTime);
+
+    void generateSimulationTif(String featureName, Instant targetTime, TSDataBlock dataBlock);
 }

@@ -18,7 +18,7 @@ public class ModelConfig {
     public ModelEventTrigger modelEventTrigger() {
         // 解析字符串为 Instant 对象
         Instant virtualStartTime = Instant.parse(startTimeStr);
-        return new ModelEventTrigger(virtualStartTime);
+        return new ModelEventTrigger();
     }
 
 }

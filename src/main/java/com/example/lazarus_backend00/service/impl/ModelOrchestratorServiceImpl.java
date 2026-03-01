@@ -1,5 +1,6 @@
 package com.example.lazarus_backend00.service.impl;
 
+import com.example.lazarus_backend00.annotation.AuditAnnotations;
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
@@ -51,6 +52,7 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
     @Override
     @Async("taskExecutor")
+    @AuditAnnotations.LogModelTriggered
     public void dispatchTask(ExecutableTask task) {
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();

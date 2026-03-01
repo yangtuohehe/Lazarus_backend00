@@ -1,5 +1,6 @@
 package com.example.lazarus_backend00.service.subservice;
 
+import com.example.lazarus_backend00.annotation.AuditAnnotations;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
 import com.example.lazarus_backend00.domain.data.TSShell;
 import com.example.lazarus_backend00.dto.subdto.DataCheckResult;
@@ -163,6 +164,7 @@ public class DataStorageServiceImpl  implements DataStorageService{
     // 接口 3: 模型计算结果入库 (Ingest Calculated Data Only)
     // 逻辑：强制添加 "-ls" 后缀
     // =================================================================
+    @AuditAnnotations.LogResultWriteBack
     public void ingestCalculatedData(TSDataBlock block) {
         // 固定后缀 "-ls"
         String suffix = "-ls";
