@@ -1,6 +1,5 @@
 package com.example.lazarus_backend00.service.impl;
 
-import com.example.lazarus_backend00.annotation.AuditAnnotations;
 import com.example.lazarus_backend00.component.clock.VirtualTimeTickEvent;
 import com.example.lazarus_backend00.service.GlobalClockService;
 import org.slf4j.Logger;
@@ -64,7 +63,7 @@ public class GlobalClockServiceImpl implements GlobalClockService {
             Thread.currentThread().interrupt();
         }
     }
-    @AuditAnnotations.LogStepStart
+
     public void reset(Instant startTime, Duration stepSize) {
         this.isRunning.set(false);
         this.currentVirtualTime = startTime;

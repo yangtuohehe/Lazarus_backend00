@@ -2,156 +2,176 @@ package com.example.lazarus_backend00.component.orchestration;
 
 import com.example.lazarus_backend00.component.clock.VirtualTimeTickEvent;
 import com.example.lazarus_backend00.component.container.Parameter;
+import com.example.lazarus_backend00.domain.axis.Feature;
+import com.example.lazarus_backend00.domain.data.DataState;
+import com.example.lazarus_backend00.domain.data.TSState;
 import com.example.lazarus_backend00.domain.data.TSShell;
-import com.example.lazarus_backend00.dto.subdto.DataUpdatePacket;
+import com.example.lazarus_backend00.domain.data.TSShellFactory;
+import com.example.lazarus_backend00.service.ModelOrchestratorService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
-import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 
-@Component
+@Slf4j
+// ⚠️ 注意：这里已经删除了 @Component，完全交由 ModelTriggerConfig 来 @Bean 实例化
 public class ModelEventTrigger {
 
-    private final Map<Integer, ModelTriggerContext> contextRegistry = new ConcurrentHashMap<>();
-    private final Map<Integer, List<ModelTriggerContext>> featureSubscriberMap = new ConcurrentHashMap<>();
-    private volatile Instant tNow;
+    private final ModelOrchestratorService orchestratorService;
+    private final AtomicLong taskIdGenerator = new AtomicLong(1000);
 
-    public ModelEventTrigger() {
-        this.tNow = Instant.parse("2022-01-01T00:00:00Z");
-        System.out.println("====== [Trigger] 初始化完成，初始虚拟时间锁定为: " + this.tNow + " ======");
+    // 位图状态表：FeatureId -> (TimeStep -> TSState)
+    private final Map<Integer, Map<Instant, TSState>> globalStateTable = new ConcurrentHashMap<>();
+    private final Map<Integer, ModelTriggerContext> registry = new ConcurrentHashMap<>();
+
+    // ⚠️ 注意：这里去掉了 = Instant.now() 的就地初始化
+    private Instant currentPhysicalTime;
+
+    // 🔥 完美对齐的构造函数：接收服务和配置文件中读取的初始时间
+    public ModelEventTrigger(ModelOrchestratorService orchestratorService, Instant startTime) {
+        this.orchestratorService = orchestratorService;
+        this.currentPhysicalTime = startTime;
+        log.info("🎯 [触发器] 已成功由配置类接管实例化！初始虚拟时间设定为: {}", this.currentPhysicalTime);
     }
 
-    public Map<String, Object> getTriggerState() {
-        Map<String, Object> state = new HashMap<>();
-        contextRegistry.forEach((id, context) -> state.put("Model_" + id, context.getFeatureStateMap()));
-        return state;
+    public void registerModel(int runtimeId, List<Parameter> params, Duration step, Duration window) {
+        registry.put(runtimeId, new ModelTriggerContext(runtimeId, params, step, window));
+    }
+
+    public void unregisterModel(int runtimeId) {
+        registry.remove(runtimeId);
     }
 
     @EventListener
     public void onVirtualTimeTick(VirtualTimeTickEvent event) {
-        this.tNow = event.getVirtualTime();
-    }
-
-    public void registerModel(int modelId, List<Parameter> parameters, Duration timeStep, Duration inputWindow) {
-        ModelTriggerContext context = new ModelTriggerContext(modelId, parameters, timeStep, inputWindow, tNow);
-        contextRegistry.put(modelId, context);
-
-        List<Integer> inputFeatureIds = context.getInputFeatureIds();
-        for (Integer inputId : inputFeatureIds) {
-            featureSubscriberMap
-                    .computeIfAbsent(inputId, k -> new CopyOnWriteArrayList<>())
-                    .add(context);
-        }
-        System.out.println(String.format(">>> [Trigger] 模型 %d 已挂载，监听特征列表: %s", modelId, inputFeatureIds));
-    }
-
-    public void unregisterModel(int modelId) {
-        ModelTriggerContext context = contextRegistry.remove(modelId);
-        if (context == null) return;
-        for (Integer featureId : context.getInputFeatureIds()) {
-            List<ModelTriggerContext> subscribers = featureSubscriberMap.get(featureId);
-            if (subscribers != null) subscribers.remove(context);
-        }
+        this.currentPhysicalTime = event.getVirtualTime();
+        evaluateAndDispatchTasks(false);
     }
 
     /**
-     * 核心接口 1：接收外部数据子系统发来的批量 JSON 广播 (已彻底移除 AOP 拦截注解)
+     * 极速状态合并 (直接操作底层位图，无锁高并发安全)
      */
-    public List<ExecutableTask> onDataUpdateBatch(List<DataUpdatePacket> packets) {
-        List<ExecutableTask> allTasks = new ArrayList<>();
-        if (packets == null || packets.isEmpty()) return allTasks;
-
-        System.out.println("\n=========================================================");
-        System.out.println("📥 [模型编排系统] 接收到 " + packets.size() + " 条数据更新广播，开始分发...");
-
-        for (DataUpdatePacket packet : packets) {
-            if (packet.getShell() != null) {
-                allTasks.addAll(onDataUpdate(packet.getShell(), packet.getStatus()));
-            }
-        }
-
-        // 打印出当前所有模型的状态快照
-        printTriggerStateSnapshot();
-
-        // 打印本次新编排好的任务列表
-        printOrchestratedTasks(allTasks);
-
-        System.out.println("=========================================================\n");
-
-        return allTasks;
-    }
-
-    public List<ExecutableTask> onModelCalculated(TSShell calculatedShell) {
-        System.out.println("🔄 [图谱回流] 内部模型产生新数据 (Feature=" + calculatedShell.getFeatureId() + ")，正在唤醒下游...");
-        return onDataUpdate(calculatedShell, 1);
-    }
-
-    public List<ExecutableTask> onDataUpdate(TSShell dataShell, int dataState) {
-        if (dataShell == null || !dataShell.hasTime()) {
-            return Collections.emptyList();
-        }
-
-        List<ModelTriggerContext> subscribers = featureSubscriberMap.get(dataShell.getFeatureId());
-        List<ExecutableTask> allTasks = new ArrayList<>();
-
-        if (subscribers != null) {
-            for (ModelTriggerContext context : subscribers) {
-                List<ExecutableTask> generatedTasks = context.processUpdate(dataShell, dataState, tNow);
-                if (!generatedTasks.isEmpty()) {
-                    allTasks.addAll(generatedTasks);
-                }
-            }
-        }
-        return allTasks;
-    }
-
-    // ================== 🔥 打印辅助方法 ==================
-
-    private void printTriggerStateSnapshot() {
-        System.out.println("\n🔍 ====== [状态快照] 当前各模型触发器的数据列表状态 ======");
-        if (contextRegistry.isEmpty()) {
-            System.out.println("   (当前系统未注册任何模型)");
-        }
-
-        contextRegistry.forEach((modelId, context) -> {
-            System.out.println("   🧩 [模型 ID: " + modelId + "]");
-            Map<Integer, Map<Instant, Integer>> stateMap = context.getFeatureStateMap();
-
-            if (stateMap == null || stateMap.isEmpty()) {
-                System.out.println("      (无监听特征)");
-            } else {
-                stateMap.forEach((featureId, timeSlots) -> {
-                    System.out.print("      └─ 特征 [" + featureId + "] -> 收集时刻: [ ");
-                    new TreeMap<>(timeSlots).forEach((time, status) -> {
-                        if (status == 1) {
-                            System.out.print(time + " ✔️ | ");
+    @EventListener
+    public void onDataStateUpdate(DataStateUpdateEvent event) {
+        for (TSState incoming : event.getTsStates()) {
+            globalStateTable.computeIfAbsent(incoming.getFeatureId(), k -> new ConcurrentHashMap<>())
+                    .compute(incoming.getTOrigin(), (k, existing) -> {
+                        if (existing == null) {
+                            return new TSState(incoming);
                         }
+                        existing.mergeState(incoming);
+                        return existing;
                     });
-                    System.out.println("]");
-                });
-            }
-        });
+        }
+        evaluateAndDispatchTasks(event.isReplacedCorrection());
     }
 
-    private void printOrchestratedTasks(List<ExecutableTask> tasks) {
-        System.out.println("\n🚀 ====== [编排结果] 本次生成的待执行任务列表 ======");
-        if (tasks.isEmpty()) {
-            System.out.println("   (无新任务生成，依赖特征尚未全部凑齐，继续等待...)");
-        } else {
-            for (ExecutableTask task : tasks) {
-                Instant targetTime = null;
-                if (task.getInputs() != null && !task.getInputs().isEmpty()) {
-                    ExecutableTask.TaskPort firstPort = task.getInputs().get(0);
-                    if (firstPort.getAtomicShells() != null && !firstPort.getAtomicShells().isEmpty()) {
-                        targetTime = firstPort.getAtomicShells().get(0).getTOrigin();
-                    }
+    private void evaluateAndDispatchTasks(boolean isReplacedFlow) {
+        Instant startScan = currentPhysicalTime.minus(Duration.ofHours(24));
+
+        for (ModelTriggerContext ctx : registry.values()) {
+            Duration step = ctx.getStep();
+
+            for (Instant t = startScan; !t.isAfter(currentPhysicalTime); t = t.plus(step)) {
+
+                if (!checkInputsReady(ctx, t)) continue;
+                if (!checkTimeValidity(ctx, t)) continue;
+
+                if (checkOutputsNeedCalc(ctx, t, isReplacedFlow)) {
+                    buildAndSubmitTask(ctx, t, isReplacedFlow);
                 }
-                System.out.println("   ▶️ 任务ID: " + task.getTaskId() + " | 模型ID: " + task.getContainerId() + " | 计算时刻: " + targetTime);
             }
         }
+    }
+
+    private void buildAndSubmitTask(ModelTriggerContext ctx, Instant t, boolean isReplacedFlow) {
+        // 1. 组装输入外壳
+        List<ExecutableTask.TaskPort> inputPorts = new ArrayList<>();
+        for (Parameter p : ctx.getInputParams()) {
+            List<TSShell> shells = new ArrayList<>();
+            for (Feature f : p.getFeatureList()) {
+                shells.add(TSShellFactory.createFromParameter(f.getId(), t, p));
+            }
+            inputPorts.add(new ExecutableTask.TaskPort(p.getTensorOrder(), shells, null));
+        }
+
+        // 2. 组装输出外壳与位图掩码
+        List<ExecutableTask.TaskPort> outputPorts = new ArrayList<>();
+        for (Parameter p : ctx.getOutputParams()) {
+            List<TSShell> shells = new ArrayList<>();
+            List<TSState> targetStates = new ArrayList<>();
+
+            for (Feature f : p.getFeatureList()) {
+                shells.add(TSShellFactory.createFromParameter(f.getId(), t, p));
+
+                // 获取当前时刻真实存在的状态掩码
+                Map<Instant, TSState> timeMap = globalStateTable.get(f.getId());
+                TSState currentState = (timeMap != null) ? timeMap.get(t) : null;
+
+                if (currentState == null) {
+                    // 如果底图全空，生成一个全空白(WAITING)的画板传下去
+                    currentState = TSShellFactory.createTSStateFromParameter(f.getId(), t, p, DataState.WAITING);
+                }
+                // 深度拷贝状态传入任务，防止并发推演时原状态被篡改
+                targetStates.add(new TSState(currentState));
+            }
+            outputPorts.add(new ExecutableTask.TaskPort(p.getTensorOrder(), shells, targetStates));
+        }
+
+        // 3. 真实下单
+        ExecutableTask task = new ExecutableTask(
+                taskIdGenerator.getAndIncrement(), ctx.getContainerId(), isReplacedFlow, inputPorts, outputPorts);
+        orchestratorService.dispatchTask(task);
+    }
+
+    private boolean checkInputsReady(ModelTriggerContext ctx, Instant baseTime) {
+        for (Parameter p : ctx.getInputParams()) {
+            for (Feature f : p.getFeatureList()) {
+                // 1. 获取全局缓存中的“大图”
+                Map<Instant, TSState> timeMap = globalStateTable.get(f.getId());
+                if (timeMap == null) return false;
+                TSState globalState = timeMap.get(baseTime);
+                if (globalState == null) return false;
+
+                // 2. 基于 Parameter 定义模型真正需要的“局地外壳”
+                TSShell requiredShell = TSShellFactory.createFromParameter(f.getId(), baseTime, p);
+
+                // 3. 调用 GIS 工具类，从大图里精准裁剪/映射出局地状态图
+                TSState localState = TSStateTopologyUtils.extractSubRegion(globalState, requiredShell);
+
+                // 4. 检查裁剪出的这块自留地里，有没有没凑齐数据的“空洞”
+                if (localState.hasHoles()) return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean checkTimeValidity(ModelTriggerContext ctx, Instant baseTime) {
+        return !baseTime.isAfter(currentPhysicalTime);
+    }
+
+    private boolean checkOutputsNeedCalc(ModelTriggerContext ctx, Instant baseTime, boolean isReplacedFlow) {
+        if (isReplacedFlow) return true;
+        for (Parameter p : ctx.getOutputParams()) {
+            for (Feature f : p.getFeatureList()) {
+                Map<Instant, TSState> timeMap = globalStateTable.get(f.getId());
+                if (timeMap == null) return true;
+
+                TSState globalState = timeMap.get(baseTime);
+                if (globalState == null) return true;
+
+                // 同样进行空间映射与裁剪
+                TSShell requiredShell = TSShellFactory.createFromParameter(f.getId(), baseTime, p);
+                TSState localState = TSStateTopologyUtils.extractSubRegion(globalState, requiredShell);
+
+                // 如果这片局地网格没算完，或者里面掺杂了实测替换数据，必须激活模型
+                if (localState.hasHoles() || localState.hasReplacedData()) return true;
+            }
+        }
+        return false;
     }
 }

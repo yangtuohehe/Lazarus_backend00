@@ -1,6 +1,6 @@
 package com.example.lazarus_backend00.service.impl;
 
-import com.example.lazarus_backend00.annotation.AuditAnnotations;
+
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
@@ -12,6 +12,7 @@ import com.example.lazarus_backend00.service.DataService;
 import com.example.lazarus_backend00.service.ModelOrchestratorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -37,7 +38,7 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
     private final Map<Long, TaskStatusDTO> activeTasksMap = new ConcurrentHashMap<>();
     public ModelOrchestratorServiceImpl(DataPreloadService dataPreloadService,
                                         DataService dataService,
-                                        ModelContainerPool containerPool,
+                                        @Lazy ModelContainerPool containerPool,
                                         ModelPoolConfig poolConfig) {
         this.dataPreloadService = dataPreloadService;
         this.dataService = dataService;
@@ -52,7 +53,6 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
     @Override
     @Async("taskExecutor")
-    @AuditAnnotations.LogModelTriggered
     public void dispatchTask(ExecutableTask task) {
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();
