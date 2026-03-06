@@ -68,7 +68,7 @@
         SELECT
         id,
         parameter_id    AS parameterId,
-        count,
+        dimension_index AS dimensionIndex,  count,
         resolution,
         unit,
         created_at      AS createdAt,

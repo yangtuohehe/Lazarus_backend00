@@ -30,8 +30,9 @@ public class TSState extends TSShell {
 
     public TSState(TSState other) {
         super(other);
-        this.readyMask = (BitSet) other.readyMask.clone();
-        this.replacedMask = (BitSet) other.replacedMask.clone();
+        // 🚨 补丁 3：防止通过网络传过来的 JSON 缺失字段导致 null.clone() 崩溃
+        this.readyMask = other.readyMask != null ? (BitSet) other.readyMask.clone() : new BitSet();
+        this.replacedMask = other.replacedMask != null ? (BitSet) other.replacedMask.clone() : new BitSet();
     }
 
     public void mergeState(TSState incoming) {

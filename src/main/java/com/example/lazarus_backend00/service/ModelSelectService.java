@@ -35,5 +35,11 @@ public interface ModelSelectService {
             Integer temporalCount,
             String wktPolygon
     );
-
+    /**
+     * 4. 根据模型ID查询真实模型完整结构 (返回完整JSON)
+     *
+     * @param processmodelId 模型ID
+     * @return 完整模型层级信息的 JSON 字符串
+     */
+    String selectModelById(Integer processmodelId);
 }

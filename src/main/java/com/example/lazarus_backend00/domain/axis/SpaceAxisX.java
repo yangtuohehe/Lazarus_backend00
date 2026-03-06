@@ -1,9 +1,12 @@
 package com.example.lazarus_backend00.domain.axis;
 
 public class SpaceAxisX extends Axis {
-
+    // ✅ 必须加上这个无参构造函数，专供 Jackson 反序列化 JSON 时使用！
+    public SpaceAxisX() {
+    }
     public SpaceAxisX(Double range, String rangeUnit,
                       Double resolution, String resolutionUnit) {
+
 
         // 1. 参数校验
         if (range == null || range <= 0) {

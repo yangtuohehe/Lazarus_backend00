@@ -34,7 +34,10 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     private static final String PATH_MEIJI_SOURCE = "D:\\CODE\\project\\Lazarus\\Data\\Meiji(1)-water\\Meiji\\data";
     private static final String PATH_REALTIME_DB = "D:\\CODE\\project\\Lazarus\\Data\\Realtime_DB";
-    private static final String URL_MAIN_SYSTEM_NOTIFY = "https://webhook.site/93bbed08-c2c3-4c72-9a2a-9fceee31b286";
+
+    // ✅ 修改 1：将地址指向主系统的 SystemIntegrationController
+    // 假设您的后端主服务运行在 8080 端口
+    private static final String URL_MAIN_SYSTEM_NOTIFY = "http://localhost:8080/api/v1/system/integration/notify-batch";
 
     private final RestTemplate restTemplate;
 
@@ -47,12 +50,15 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     public DataSubsystemServiceImpl(org.springframework.boot.web.client.RestTemplateBuilder restTemplateBuilder) {
         this.restTemplate = restTemplateBuilder.build();
-        profiles.add(new FeatureProfile(1, "salinity", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 3, 0.10, 0.50));
-        profiles.add(new FeatureProfile(2, "temp", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(5), 3, 0.05, 0.80));
-        profiles.add(new FeatureProfile(3, "precip", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 6, 0.15, 0.40));
-        profiles.add(new FeatureProfile(4, "evap", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 3, 0.30, 0.50));
-        profiles.add(new FeatureProfile(5, "salinity05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(12), 3, 0.10, 0.50));
-        profiles.add(new FeatureProfile(7, "temp05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 3, 0.10, 0.95));
+
+        // ✅ 修改 2：将所有特征的 packetLossRate (倒数第二个参数) 和 replacementProb (倒数第一个参数) 设为 0.0
+        // 这样只保留了 latency (延迟) 和 transmissionStep (打包步长) 的模拟，消除了所有的“随机出问题”概率
+        profiles.add(new FeatureProfile(1, "salinity", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(2, "temp", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(5), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(3, "precip", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(4, "evap", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(5, "salinity05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(12), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(7, "temp05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
     }
 
     @Override
@@ -94,6 +100,8 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
         for (int i = 0; i < stepsToProcess; i++) {
             Instant nextTarget = cursor.plus(1, profile.resolution);
+
+            // 这里的 Math.random() < 0.0 永远为 false，不会再发生丢包
             if (Math.random() < profile.packetLossRate) {
                 cursor = nextTarget;
                 continue;
@@ -101,7 +109,6 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
             int status = determineStatusAndCopy(profile, nextTarget);
             if (status > 0) {
-                // 🔥 将查到的新 TIF 生成 TSState 状态并入队
                 notificationBuffer.offer(createStatePacket(profile, nextTarget, status));
             }
             cursor = nextTarget;
@@ -118,6 +125,7 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
         int status;
 
         if (Files.exists(simPath)) {
+            // 这里 replacementProb 也是 0.0，所以遇到 -ls 仿真文件时，status 永远置 0，不会触发重复发送
             status = (Math.random() < profile.replacementProb) ? 2 : 0;
         } else {
             status = 1;
@@ -157,23 +165,41 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     // 🔥 核心：生成整张 TIF 对应的 TSState (包含全局包络线与全满位图)
     private TSState createStatePacket(FeatureProfile profile, Instant time, int status) {
-        double res = 3600.0;
 
+        // =====================================================================
+        // ⚠️ 请在这里填入您从模型 (id=2) 提取到的真实地理参数！
+        // =====================================================================
+
+        // 1. 时间轴参数 (假设模型步长是 1小时 = 3600秒)
+        double timeRes = 3600.0;
+
+        // 2. X轴 (经度) 参数
+        double originX = 115.425208;       // 👈 替换为提取到的 originPointLon
+        double resX = 0.009583;            // 👈 替换为提取到的 X轴 resolution
+        int countX = 24;             // 👈 替换为提取到的 X轴 count
+        double spanX = resX * countX; // 您的系统目前 SpaceAxisX 构造函数的第一个参数是跨度(Span)
+
+        // 3. Y轴 (纬度) 参数
+        double originY = 10.014792;        // 👈 替换为提取到的 originPointLat
+        double resY = 0.009583;            // 👈 替换为提取到的 Y轴 resolution
+        int countY = 24;             // 👈 替换为提取到的 Y轴 count
+        double spanY = resY * countY; // 跨度(Span) = 分辨率 * 节点数
+
+        // =====================================================================
+
+        // 构建带有真实硬编码参数的 TSShell
         TSShell shell = new TSShell.Builder(profile.featureId)
-                .time(time, new TimeAxis(res, "Seconds", res, "Seconds"))
-                // 修复：X轴跨度 360度，分辨率 1度 (这样 count 才会算出 360)
-                .x(-180.0, new SpaceAxisX(360.0, "Degrees", 1.0, "Degrees"))
-                // 修复：Y轴跨度 180度，分辨率 1度 (这样 count 才会算出 180)
-                .y(-90.0, new SpaceAxisY(180.0, "Degrees", 1.0, "Degrees"))
+                .time(time, new TimeAxis(timeRes, "Seconds", timeRes, "Seconds"))
+                // 设置真实的原点和轴信息
+                .x(originX, new SpaceAxisX(spanX, "Degrees", resX, "Degrees"))
+                .y(originY, new SpaceAxisY(spanY, "Degrees", resY, "Degrees"))
                 .build();
 
         DataState dataState = (status == 2) ? DataState.REPLACED : DataState.READY;
         return TSShellFactory.createTSStateFromShell(shell, dataState);
     }
-
     @Override
     public void generateSimulationTif(String featureName, Instant time, TSDataBlock dataBlock) {
-        // ... (原样保留你的创建空 .tif 逻辑)
     }
 
     private static class FeatureProfile {

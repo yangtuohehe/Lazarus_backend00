@@ -21,10 +21,13 @@ public class TSShellFactory {
     // ===============================================================
     public static TSShell createFromParameter(int featureId, Instant initialTime, Parameter parameter) {
         TSShell.Builder builder = new TSShell.Builder(featureId);
-        double xOrigin = parameter.getOriginPoint().getCoordinate().getX();
-        double yOrigin = parameter.getOriginPoint().getCoordinate().getY();
-        double zOrigin = Double.isNaN(parameter.getOriginPoint().getCoordinate().getZ())
-                ? 0.0 : parameter.getOriginPoint().getCoordinate().getZ();
+        double xOrigin = 0.0, yOrigin = 0.0, zOrigin = 0.0;
+        if (parameter.getOriginPoint() != null && parameter.getOriginPoint().getCoordinate() != null) {
+            xOrigin = parameter.getOriginPoint().getCoordinate().getX();
+            yOrigin = parameter.getOriginPoint().getCoordinate().getY();
+            zOrigin = Double.isNaN(parameter.getOriginPoint().getCoordinate().getZ())
+                    ? 0.0 : parameter.getOriginPoint().getCoordinate().getZ();
+        }
 
         List<Axis> axisList = parameter.getAxisList();
         if (axisList != null) {

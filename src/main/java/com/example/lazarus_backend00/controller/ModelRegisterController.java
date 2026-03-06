@@ -4,6 +4,7 @@ import com.example.lazarus_backend00.dto.*;
 import com.example.lazarus_backend00.infrastructure.persistence.entity.*;
 import com.example.lazarus_backend00.domain.axis.Axis;
 import com.example.lazarus_backend00.service.ModelRegisterService;
+import com.example.lazarus_backend00.service.ModelSelectService;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.PrecisionModel;
@@ -22,12 +23,14 @@ import java.util.List;
 public class ModelRegisterController {
 
     private final ModelRegisterService modelRegisterService;
-
+    private final ModelSelectService modelSelectService;
     // 指定 SRID=4326 (WGS84)
     private final GeometryFactory gf = new GeometryFactory(new PrecisionModel(), 4326);
 
-    public ModelRegisterController(ModelRegisterService modelRegisterService) {
+    public ModelRegisterController(ModelRegisterService modelRegisterService,
+                                   ModelSelectService modelSelectService) {
         this.modelRegisterService = modelRegisterService;
+        this.modelSelectService = modelSelectService;
     }
 
     @PostMapping(value = "/register", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -106,78 +109,23 @@ public class ModelRegisterController {
 
 
     /**
-     * 【调试专用接口】
-     * 作用：生成一个后端完美兼容的 DTO 对象，并以 JSON 返回。
-     * 用法：调用此接口，复制返回的 JSON，那就是标准答案。
+     * ✅ 获取数据库中真实的模型结构数据
      */
     @GetMapping("/structure")
-    public ResponseEntity<ModelRegisterRequest> getStandardJsonStructure() {
-        ModelRegisterRequest request = new ModelRegisterRequest();
+    public ResponseEntity<?> getRealJsonStructure(@RequestParam(value = "modelId", defaultValue = "2") Integer modelId) {
 
-        // 1. 组装 Model 部分 (重点关注 version 类型)
-        DynamicProcessModelDTO modelDto = new DynamicProcessModelDTO();
-        modelDto.setModelName("标准结构示例模型");
-        modelDto.setModelAuthor("DebugTool");
-        modelDto.setModelSummary("此 JSON 由后端直接生成，格式绝对正确");
-        modelDto.setModelSourcePaper("无");
-        modelDto.setVersion(1); // ✅ 重点：设置整数 1
-        request.setDynamicProcessModel(modelDto); // 这里的 Setter 决定了 JSON Key 是 dynamicProcessModel
+        // 调用 Service 从数据库获取真实聚合出来的 JSON
+        String realJsonData = modelSelectService.selectModelById(modelId);
 
-        // 2. 组装 Interface 部分
-        ModelInterfaceDTO interfaceDto = new ModelInterfaceDTO();
-        interfaceDto.setInterfaceName("标准接口");
-        interfaceDto.setDefault(true);
-        interfaceDto.setInterfaceSummary("调试用");
+        if (realJsonData == null || realJsonData.trim().isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
 
-        // 3. 组装 Parameter 部分 (重点关注 tensorOrder 类型)
-        List<ParameterDTO> params = new ArrayList<>();
-        ParameterDTO param = new ParameterDTO();
-        param.setIoType("INPUT");
-        param.setTensorOrder(0); // ✅ 重点：设置整数 0
-        param.setOriginPointLon(110.5);
-        param.setOriginPointLat(20.0);
-
-        // 4. 组装 Axis 部分 (重点关注 type 字段)
-        List<AxisDTO> axes = new ArrayList<>();
-
-        // 时间轴
-        TimeAxisDTO tAxis = new TimeAxisDTO();
-        tAxis.setType("TIME"); // ✅ 重点：后端靠这个字符串区分类型
-        tAxis.setDimensionIndex(1);
-        tAxis.setCount(10);
-        tAxis.setResolution(1.0);
-        tAxis.setUnit("hour");
-        axes.add(tAxis);
-
-        // 空间轴
-        SpaceAxisXDTO xAxis = new SpaceAxisXDTO();
-        xAxis.setType("SPACE_X"); // ✅ 重点
-        xAxis.setDimensionIndex(2);
-        xAxis.setCount(50);
-        xAxis.setResolution(0.1);
-        xAxis.setUnit("degree");
-        axes.add(xAxis);
-
-        param.setAxis(axes);
-
-        // 5. 组装 Feature 部分
-        List<FeatureDTO> features = new ArrayList<>();
-        FeatureDTO f = new FeatureDTO();
-        f.setFeatureName("temperature");
-        features.add(f);
-
-        param.setFeatures(features);
-
-        params.add(param);
-        interfaceDto.setParameters(params);
-
-        request.setModelInterface(interfaceDto); // 这里的 Setter 决定了 JSON Key 是 modelInterface
-
-        return ResponseEntity.ok(request);
+        // 返回真实的 JSON 字符串，并指定 Content-Type 为 application/json
+        return ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(realJsonData);
     }
-
-
-
 
 
 

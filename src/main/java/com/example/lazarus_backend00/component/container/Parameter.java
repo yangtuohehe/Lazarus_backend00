@@ -1,6 +1,7 @@
 package com.example.lazarus_backend00.component.container;
 
 import com.example.lazarus_backend00.domain.axis.*;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
@@ -23,7 +24,7 @@ public class Parameter {
 
     // 只读属性，由内部计算得出，支持 Point, Polygon(2D), Polygon(3D)
     private final Geometry coverageGeom;
-
+    @JsonProperty("axis")
     private final List<Axis> axisList;
     private final List<Feature> featureList;
 
@@ -149,4 +150,15 @@ public class Parameter {
     public Geometry getCoverageGeom() { return coverageGeom; }
     public List<Axis> getAxisList() { return axisList; }
     public List<Feature> getFeatureList() { return featureList; }
+
+    public TimeAxis getTimeAxis() {
+        if (axisList != null) {
+            for (Axis axis : axisList) {
+                if (axis instanceof TimeAxis) {
+                    return (TimeAxis) axis;
+                }
+            }
+        }
+        return null;
+    }
 }

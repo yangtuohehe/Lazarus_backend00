@@ -17,9 +17,16 @@ public class ModelSelectServiceImpl implements ModelSelectService {
     private final ParameterDao parameterDao;
     private final FeatureDao featureDao;
     private final FeatureParameterDao featureParameterDao;
-    private final TimeAxisDao timeAxisDao; // 确保注入了这个
+    private final TimeAxisDao timeAxisDao;
+
+    // ✅ 新增：为了还原真实的地理分辨率和维度，必须注入空间轴的 Dao
+    private final SpaceAxisXDao spaceAxisXDao;
+    private final SpaceAxisYDao spaceAxisYDao;
+    private final SpaceAxisZDao spaceAxisZDao;
+
     private final ObjectMapper objectMapper;
 
+    // ✅ 修改：在构造函数中加入新注入的 Dao
     public ModelSelectServiceImpl(
             DynamicProcessModelDao dynamicProcessModelDao,
             ModelInterfaceDao modelInterfaceDao,
@@ -27,6 +34,9 @@ public class ModelSelectServiceImpl implements ModelSelectService {
             FeatureDao featureDao,
             FeatureParameterDao featureParameterDao,
             TimeAxisDao timeAxisDao,
+            SpaceAxisXDao spaceAxisXDao,
+            SpaceAxisYDao spaceAxisYDao,
+            SpaceAxisZDao spaceAxisZDao,
             ObjectMapper objectMapper) {
         this.dynamicProcessModelDao = dynamicProcessModelDao;
         this.modelInterfaceDao = modelInterfaceDao;
@@ -34,6 +44,9 @@ public class ModelSelectServiceImpl implements ModelSelectService {
         this.featureDao = featureDao;
         this.featureParameterDao = featureParameterDao;
         this.timeAxisDao = timeAxisDao;
+        this.spaceAxisXDao = spaceAxisXDao;
+        this.spaceAxisYDao = spaceAxisYDao;
+        this.spaceAxisZDao = spaceAxisZDao;
         this.objectMapper = objectMapper;
     }
 
@@ -185,6 +198,95 @@ public class ModelSelectServiceImpl implements ModelSelectService {
             throw new RuntimeException("根据时空条件反查模型详情失败: " + e.getMessage());
         }
     }
+
+    // =========================================================================
+    // 🔥 接口 4: 根据 ID 查询真实模型结构 (完美适配测试前端 Simulator 期望的结构)
+    // =========================================================================
+    @Override
+    public String selectModelById(Integer processmodelId) {
+        try {
+            DynamicProcessModelEntity model = dynamicProcessModelDao.selectById(processmodelId);
+            if (model == null) return null;
+
+            // 构造一个与前端 ModelRegisterRequest 结构完美对应的根节点，方便 Simulator 使用 .path() 解析
+            Map<String, Object> rootNode = new HashMap<>();
+            rootNode.put("dynamicProcessModel", model);
+
+            ModelInterfaceEntity iQuery = new ModelInterfaceEntity();
+            iQuery.setProcessmodelId(model.getId());
+            List<ModelInterfaceEntity> interfaces = modelInterfaceDao.selectByCondition(iQuery);
+
+            if (!interfaces.isEmpty()) {
+                ModelInterfaceEntity iface = interfaces.get(0); // 取主接口
+                Map<String, Object> ifaceMap = new HashMap<>();
+                ifaceMap.put("interfaceName", iface.getInterfaceName());
+
+                ParameterEntity pQuery = new ParameterEntity();
+                pQuery.setInterfaceId(iface.getId());
+                List<ParameterEntity> parameters = parameterDao.selectByCondition(pQuery);
+                List<Map<String, Object>> parameterMaps = new ArrayList<>();
+
+                for (ParameterEntity param : parameters) {
+                    Map<String, Object> paramMap = new HashMap<>();
+                    paramMap.put("ioType", param.getIoType());
+
+                    // 🌟 核心：将 PostGIS 存的 Geometry 还原拆解为明文的 Lon 和 Lat
+                    if (param.getOriginPoint() != null) {
+                        // 强制转换为 Point，并提取 X 和 Y 放入 Map 中
+                        org.locationtech.jts.geom.Point point = (org.locationtech.jts.geom.Point) param.getOriginPoint();
+
+                        double lon = point.getX();
+                        double lat = point.getY();
+
+                        paramMap.put("originPointLon", lon);
+                        paramMap.put("originPointLat", lat);
+                    }
+
+                    // 🌟 核心：查出真实的 Axis 轴参数并组装为 Array，供测试代码提取 resolution 和 count
+                    List<Map<String, Object>> axesList = new ArrayList<>();
+
+                    TimeAxisEntity tQuery = new TimeAxisEntity();
+                    tQuery.setParameterId(param.getId());
+                    for (TimeAxisEntity t : timeAxisDao.selectByCondition(tQuery)) {
+                        axesList.add(createAxisNode("TIME", t.getResolution(), t.getCount(), t.getUnit()));
+                    }
+
+                    SpaceAxisXEntity xQuery = new SpaceAxisXEntity();
+                    xQuery.setParameterId(param.getId());
+                    for (SpaceAxisXEntity x : spaceAxisXDao.selectByCondition(xQuery)) {
+                        axesList.add(createAxisNode("SPACE_X", x.getResolution(), x.getCount(), x.getUnit()));
+                    }
+
+                    SpaceAxisYEntity yQuery = new SpaceAxisYEntity();
+                    yQuery.setParameterId(param.getId());
+                    for (SpaceAxisYEntity y : spaceAxisYDao.selectByCondition(yQuery)) {
+                        axesList.add(createAxisNode("SPACE_Y", y.getResolution(), y.getCount(), y.getUnit()));
+                    }
+
+                    paramMap.put("axis", axesList);
+                    parameterMaps.add(paramMap);
+                }
+                ifaceMap.put("parameters", parameterMaps);
+                rootNode.put("modelInterface", ifaceMap);
+            }
+
+            return objectMapper.writeValueAsString(rootNode);
+
+        } catch (Exception e) {
+            throw new RuntimeException("根据ID查询真实模型全貌失败", e);
+        }
+    }
+
+    // 辅助方法：生成标准化轴信息节点
+    private Map<String, Object> createAxisNode(String type, Double res, Integer count, String unit) {
+        Map<String, Object> node = new HashMap<>();
+        node.put("type", type);
+        node.put("resolution", res);
+        node.put("count", count);
+        node.put("unit", unit);
+        return node;
+    }
+
 
     // =========================================================================
     // 🔥 核心私有方法：构建完整的模型层级结构 JSON
