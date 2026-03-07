@@ -2,9 +2,11 @@ package com.example.lazarus_backend00.component.container;
 
 import ai.onnxruntime.*;
 import com.example.lazarus_backend00.domain.axis.Feature;
+import com.example.lazarus_backend00.domain.axis.TimeAxis;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
 
 import java.nio.FloatBuffer;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -205,52 +207,92 @@ public class DirectOnnxModelContainer implements ModelContainer {
      */
     private List<List<TSDataBlock>> parseOutputs(OrtSession.Result results, TSDataBlock templateBlock) {
         List<List<TSDataBlock>> allOutputs = new ArrayList<>();
-
         List<Parameter> outputParams = getSortedOutputParameters();
 
-        Iterator<Map.Entry<String, OnnxValue>> resultIter = results.iterator();
+        // 动态计算预测输出的 TOrigin
+        Instant outputTOrigin = templateBlock.getTOrigin();
+        TimeAxis inputTAxis = templateBlock.getTAxis();
+        if (outputTOrigin != null && inputTAxis != null && inputTAxis.getCount() != null) {
+            long totalInputDurationSec = inputTAxis.getCount() * getAxisResolutionInSeconds(inputTAxis);
+            outputTOrigin = outputTOrigin.plusSeconds(totalInputDurationSec);
+        }
 
+        Iterator<Map.Entry<String, OnnxValue>> resultIter = results.iterator();
         for (Parameter param : outputParams) {
             if (!resultIter.hasNext()) break;
-
             OnnxValue value = resultIter.next().getValue();
             if (!(value instanceof OnnxTensor)) continue;
 
             try {
-                // 1. 获取数据
                 float[] tensorData = ((OnnxTensor) value).getFloatBuffer().array();
+                int channelCount = param.getFeatureList().size();
 
-                // 2. 拆解 Channel
-                List<Feature> features = param.getFeatureList();
-                int channelCount = features.size();
+                // 🎯 核心诊断：单通道的长度
                 int singleBlockLength = tensorData.length / channelCount;
 
-                List<TSDataBlock> groupBlocks = new ArrayList<>();
+                System.out.println("🔧 [ONNX Container] Tensor Size: " + tensorData.length +
+                        ", Channel Count: " + channelCount +
+                        ", Elements per Block: " + singleBlockLength);
+
+                List<TSDataBlock> portOutputs = new ArrayList<>();
 
                 for (int c = 0; c < channelCount; c++) {
-                    Feature f = features.get(c);
-
-                    // 2.1 切片
+                    Feature f = param.getFeatureList().get(c);
                     float[] slice = new float[singleBlockLength];
+
+                    // ⚠️ 极其关键：确保跨通道切片不会发生交叠
                     System.arraycopy(tensorData, c * singleBlockLength, slice, 0, singleBlockLength);
 
-                    // 2.2 封装
-                    TSDataBlock.Builder builder = new TSDataBlock.Builder();
-                    builder.featureId(f.getId());
-                    builder.data(slice);
+                    TSDataBlock.Builder builder = new TSDataBlock.Builder()
+                            .featureId(f.getId())
+                            .data(slice);
 
-                    // 复制时空元数据
-                    copyMetadata(templateBlock, builder);
-
-                    groupBlocks.add(builder.build());
+                    applyOutputMetadata(param, outputTOrigin, builder);
+                    portOutputs.add(builder.build());
                 }
-                allOutputs.add(groupBlocks);
-
+                allOutputs.add(portOutputs);
             } catch (Exception e) {
-                throw new RuntimeException("解析输出张量失败: " + param.getTensorOrder(), e);
+                throw new RuntimeException("Parse ONNX output failed", e);
             }
         }
         return allOutputs;
+    }
+
+    // ================== 核心修复：新增的两个元数据推演与组装辅助方法 ==================
+
+    /**
+     * 将解析出的时间原点和输出参数中定义的空间轴，强制注入到 DataBlock 中
+     */
+    private void applyOutputMetadata(Parameter param, Instant outputTOrigin, TSDataBlock.Builder builder) {
+        // 1. 注入输出时间轴
+        if (param.getTimeAxis() != null && outputTOrigin != null) {
+            builder.time(outputTOrigin, param.getTimeAxis());
+        }
+
+        // 2. 注入输出空间轴
+        if (param.getAxisList() != null) {
+            for (com.example.lazarus_backend00.domain.axis.Axis axis : param.getAxisList()) {
+                if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisX) {
+                    builder.x(param.getOriginPoint().getX(), (com.example.lazarus_backend00.domain.axis.SpaceAxisX) axis);
+                } else if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisY) {
+                    builder.y(param.getOriginPoint().getY(), (com.example.lazarus_backend00.domain.axis.SpaceAxisY) axis);
+                } else if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisZ) {
+                    builder.z(param.getOriginPoint().getCoordinate().getZ(), (com.example.lazarus_backend00.domain.axis.SpaceAxisZ) axis);
+                }
+            }
+        }
+    }
+
+    /**
+     * 将时间轴的单位统一转换为秒，用于计算时间偏移量
+     */
+    private long getAxisResolutionInSeconds(com.example.lazarus_backend00.domain.axis.TimeAxis tAxis) {
+        if (tAxis == null || tAxis.getResolution() == null) return 0;
+        double res = tAxis.getResolution();
+        String unit = (tAxis.getUnit() != null) ? tAxis.getUnit().trim().toLowerCase() : "s";
+        if (unit.startsWith("h")) return (long) (res * 3600);
+        if (unit.startsWith("m")) return (long) (res * 60);
+        return (long) res;
     }
 
     private List<Parameter> getSortedOutputParameters() {

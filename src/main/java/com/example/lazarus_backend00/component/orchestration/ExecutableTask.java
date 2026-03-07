@@ -9,16 +9,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.BitSet;
 
-/**
- * 可执行任务单 (像元级位图过滤版)
- * 职责：携带触发器算好的位图状态 (TSState)，并在获得输出后，执行真实的冗余数据擦除。
- */
 public class ExecutableTask {
 
     private final long taskId;
     private final int containerId;
     private final boolean isReplacedCorrection;
-
     private final List<TaskPort> inputs;
     private final List<TaskPort> outputs;
 
@@ -46,15 +41,11 @@ public class ExecutableTask {
     }
 
     /**
-     * 【位图级真实裁剪引擎】
-     * 遍历容器算出的 Float 数组，对照总线中的位图状态：
-     * 如果该像元在底图中已经有数据了（不是空洞），就把它擦除（置为 NaN），防止覆写历史合法数据。
+     * 【真正的三维时空像素级裁剪引擎】
+     * 严谨对齐时间轴，按帧 (Frame) 提取对应的 TSState 位图，进行地理交叠擦除。
      */
     public List<List<TSDataBlock>> filterRedundantOutputs(List<List<TSDataBlock>> rawOutputs) {
-        // 如果是纠偏任务，强制全量覆盖，不需要过滤
-        if (isReplacedCorrection) {
-            return rawOutputs;
-        }
+        if (isReplacedCorrection) return rawOutputs;
 
         List<List<TSDataBlock>> filteredOutputs = new ArrayList<>();
 
@@ -65,30 +56,41 @@ public class ExecutableTask {
 
             for (int j = 0; j < rawGroup.size(); j++) {
                 TSDataBlock rawBlock = rawGroup.get(j);
-                TSState targetState = portConf.getTargetStates().get(j);
 
-                if (targetState != null) {
-                    // 1. 获取触发器算好的“空洞掩码”：true 代表没数据（需要填），false 代表有数据（需要抠掉）
-                    BitSet missingHoles = targetState.getMissingHolesMask();
+                // 🎯 拿到该特征对应的 12 个时间帧的独立地理掩码
+                List<TSState> featureTargetStates = portConf.getTargetStatesPerFeature().get(j);
+
+                if (featureTargetStates != null && !featureTargetStates.isEmpty()) {
                     float[] data = rawBlock.getData();
 
-                    // 2. 真实的一维数组遍历与位图核对
+                    // 计算单帧的二维网格大小 (例如 100x100 = 10000)
+                    int frameSize = data.length / featureTargetStates.size();
                     boolean hasValidData = false;
-                    for (int k = 0; k < data.length; k++) {
-                        if (!missingHoles.get(k)) {
-                            // 已经被底图占据的位置，新算出来的数据作废，置为无数据
-                            data[k] = Float.NaN;
-                        } else {
-                            hasValidData = true; // 只要有一个格子是有效填补的，这个 Block 就有价值
+
+                    // 🎯 逐帧进行时空遍历
+                    for (int t = 0; t < featureTargetStates.size(); t++) {
+                        TSState targetState = featureTargetStates.get(t);
+                        BitSet missingHoles = targetState.getMissingHolesMask();
+                        int offset = t * frameSize; // 该帧在三维数组中的偏移量
+
+                        for (int k = 0; k < frameSize; k++) {
+                            // !missingHoles 代表这里大盘已经有观测数据了
+                            if (!missingHoles.get(k)) {
+                                data[offset + k] = Float.NaN; // 严谨擦除
+                            } else {
+                                // 如果没被擦除，且模型确实算出了有效值
+                                if (!Float.isNaN(data[offset + k])) {
+                                    hasValidData = true;
+                                }
+                            }
                         }
                     }
 
-                    // 3. 只有当这个块里确实包含有效的新数据时，才放行
+                    // 只要这 12 帧里有哪怕 1 个像素是有效的增量数据，就保留这个 Block
                     if (hasValidData) {
                         filteredGroup.add(rawBlock);
                     }
                 } else {
-                    // 如果没有限制状态，全量放行
                     filteredGroup.add(rawBlock);
                 }
             }
@@ -104,17 +106,17 @@ public class ExecutableTask {
         private final int order;
         private final List<TSShell> atomicShells;
 
-        // 核心变更：这里现在是 TSState，而不是 Envelope！
-        private final List<TSState> targetStates;
+        // 🎯 核心变更：从 List<TSState> 变为 List<List<TSState>> (Feature -> TimeSteps)
+        private final List<List<TSState>> targetStatesPerFeature;
 
-        public TaskPort(int order, List<TSShell> atomicShells, List<TSState> targetStates) {
+        public TaskPort(int order, List<TSShell> atomicShells, List<List<TSState>> targetStatesPerFeature) {
             this.order = order;
             this.atomicShells = atomicShells;
-            this.targetStates = targetStates != null ? targetStates : new ArrayList<>();
+            this.targetStatesPerFeature = targetStatesPerFeature != null ? targetStatesPerFeature : new ArrayList<>();
         }
 
         public int getOrder() { return order; }
         public List<TSShell> getAtomicShells() { return atomicShells; }
-        public List<TSState> getTargetStates() { return targetStates; }
+        public List<List<TSState>> getTargetStatesPerFeature() { return targetStatesPerFeature; }
     }
 }

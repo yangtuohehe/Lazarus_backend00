@@ -154,7 +154,8 @@ public class Parameter {
     public TimeAxis getTimeAxis() {
         if (axisList != null) {
             for (Axis axis : axisList) {
-                if (axis instanceof TimeAxis) {
+                // ✅ 关键：支持多态判断
+                if ("TIME".equalsIgnoreCase(axis.getType()) && (axis instanceof TimeAxis)) {
                     return (TimeAxis) axis;
                 }
             }

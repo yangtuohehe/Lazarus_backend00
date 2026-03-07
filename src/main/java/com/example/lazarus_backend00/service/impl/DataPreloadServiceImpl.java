@@ -21,8 +21,10 @@ public class DataPreloadServiceImpl implements DataPreloadService {
 
     private final DataService dataService;
 
-    // 内存中的 Future 缓存池
-    // Key: TaskID, Value: 数据结果的 Future
+    /**
+     * Future cache pool in memory
+     * Key: TaskID, Value: CompletableFuture for data results
+     */
     private final Map<Long, CompletableFuture<List<TSDataBlock>>> futureCache = new ConcurrentHashMap<>();
 
     public DataPreloadServiceImpl(DataService dataService) {
@@ -30,36 +32,36 @@ public class DataPreloadServiceImpl implements DataPreloadService {
     }
 
     @Override
-    @Async("taskExecutor") // 关键：异步执行
+
     public void startFetching(long taskId, List<TSShell> inputShells) {
-        // 1. 注册占位符
+        // 1. Register placeholder
         CompletableFuture<List<TSDataBlock>> future = new CompletableFuture<>();
         futureCache.put(taskId, future);
 
         try {
-            // log.debug("📥 [Preload] Task-{} 开始从数据库拉取 {} 个数据块...", taskId, inputShells.size());
+            log.info("📥 [Preload] Task-{} started. Fetching {} blocks from database...", taskId, inputShells.size());
 
             List<TSDataBlock> resultBlocks = new ArrayList<>();
 
-            // 2. 执行 IO 操作 (调用 DataService)
+            // 2. Perform IO operations (Calling DataService)
             for (TSShell shell : inputShells) {
-                // 假设 fetchData 返回单个 Block
                 TSDataBlock block = dataService.fetchData(shell);
 
-                // 数据完整性检查
+                // Check data integrity
                 if (block == null) {
-                    throw new IllegalStateException("缺失必要输入数据: FeatureID=" + shell.getFeatureId());
+                    throw new IllegalStateException("Required input data missing: FeatureID=" + shell.getFeatureId()
+                            + " at " + shell.getTOrigin());
                 }
                 resultBlocks.add(block);
             }
 
-            // 3. 填充结果，唤醒等待线程
+            // 3. Complete future and wake up waiting threads
             future.complete(resultBlocks);
-            // log.debug("✅ [Preload] Task-{} 数据准备就绪。", taskId);
+            log.info("✅ [Preload] Task-{} data preparation ready.", taskId);
 
         } catch (Exception e) {
-            // 异常传递：通知等待者发生了错误
-            log.error("❌ [Preload] Task-{} 取数失败: {}", taskId, e.getMessage());
+            // Error propagation: Notify awaiters that an error occurred
+            log.error("❌ [Preload] Task-{} fetch failed: {}", taskId, e.getMessage());
             future.completeExceptionally(e);
         }
     }
@@ -69,19 +71,22 @@ public class DataPreloadServiceImpl implements DataPreloadService {
         CompletableFuture<List<TSDataBlock>> future = futureCache.get(taskId);
 
         if (future == null) {
-            throw new IllegalStateException("Task-" + taskId + " 未注册预取任务，流程逻辑错误！");
+            // This happens if getData is called before startFetching registers the ID
+            throw new IllegalStateException("CRITICAL: Task-" + taskId + " not found in Preload Registry!");
         }
 
         try {
-            // 4. 阻塞等待
+            // 4. Block and wait for results
             return future.get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            throw new TimeoutException("等待数据超时: Task-" + taskId);
+            log.error("⏰ [Preload] Wait timeout: Task-{}", taskId);
+            throw new TimeoutException("Wait data timeout: Task-" + taskId);
         } catch (ExecutionException e) {
-            // 抛出 startFetching 中捕获的原始异常
+            // Throw the original exception caught in startFetching
+            log.error("❌ [Preload] Execution exception for Task-{}: {}", taskId, e.getCause().getMessage());
             throw (Exception) e.getCause();
         } finally {
-            // 5. 清理缓存 (一次性消费)
+            // 5. Clean cache (One-time consumption)
             futureCache.remove(taskId);
         }
     }

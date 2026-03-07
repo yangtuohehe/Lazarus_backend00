@@ -29,7 +29,7 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     private static final Logger log = LoggerFactory.getLogger(DataSubsystemServiceImpl.class);
 
-    private static final int BROADCAST_INTERVAL_HOURS = 8;
+    private static final int BROADCAST_INTERVAL_HOURS = 1;
     private Instant nextBroadcastTime;
 
     private static final String PATH_MEIJI_SOURCE = "D:\\CODE\\project\\Lazarus\\Data\\Meiji(1)-water\\Meiji\\data";
@@ -46,19 +46,19 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
     private final Map<String, Instant> ingestionCursors = new ConcurrentHashMap<>();
     private final List<FeatureProfile> profiles = new ArrayList<>();
 
-    private static final DateTimeFormatter FMT_MEIJI = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter FMT_MEIJI = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss").withZone(java.time.ZoneOffset.UTC);
 
     public DataSubsystemServiceImpl(org.springframework.boot.web.client.RestTemplateBuilder restTemplateBuilder) {
         this.restTemplate = restTemplateBuilder.build();
 
         // ✅ 修改 2：将所有特征的 packetLossRate (倒数第二个参数) 和 replacementProb (倒数第一个参数) 设为 0.0
         // 这样只保留了 latency (延迟) 和 transmissionStep (打包步长) 的模拟，消除了所有的“随机出问题”概率
-        profiles.add(new FeatureProfile(1, "salinity", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
-        profiles.add(new FeatureProfile(2, "temp", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(5), 1, 0.0, 0.0));
-        profiles.add(new FeatureProfile(3, "precip", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
-        profiles.add(new FeatureProfile(4, "evap", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
-        profiles.add(new FeatureProfile(5, "salinity05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(12), 1, 0.0, 0.0));
-        profiles.add(new FeatureProfile(7, "temp05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(7), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(1, "salinity", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(2, "temp", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(3, "precip", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(4, "evap", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(5, "salinity05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
+        profiles.add(new FeatureProfile(7, "temp05", PATH_MEIJI_SOURCE, ChronoUnit.HOURS, FMT_MEIJI, Duration.ofHours(24), 1, 0.0, 0.0));
     }
 
     @Override
@@ -87,7 +87,8 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     private void processFeature(FeatureProfile profile, Instant systemTime) {
         String name = profile.name;
-        ingestionCursors.putIfAbsent(name, systemTime);
+        // 修改后：让游标从系统时钟的前 48 小时开始，确保它能越过 24 小时的延迟线
+        ingestionCursors.putIfAbsent(name, systemTime.minus(Duration.ofHours(48)));
         Instant cursor = ingestionCursors.get(name);
 
         Instant visibleHorizon = systemTime.minus(profile.latency);
@@ -171,7 +172,7 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
         // =====================================================================
 
         // 1. 时间轴参数 (假设模型步长是 1小时 = 3600秒)
-        double timeRes = 3600.0;
+        double timeRes = 1.0;
 
         // 2. X轴 (经度) 参数
         double originX = 115.425208;       // 👈 替换为提取到的 originPointLon
@@ -189,7 +190,7 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
         // 构建带有真实硬编码参数的 TSShell
         TSShell shell = new TSShell.Builder(profile.featureId)
-                .time(time, new TimeAxis(timeRes, "Seconds", timeRes, "Seconds"))
+                .time(time, new TimeAxis(timeRes, "Hours", timeRes, "Hours"))
                 // 设置真实的原点和轴信息
                 .x(originX, new SpaceAxisX(spanX, "Degrees", resX, "Degrees"))
                 .y(originY, new SpaceAxisY(spanY, "Degrees", resY, "Degrees"))

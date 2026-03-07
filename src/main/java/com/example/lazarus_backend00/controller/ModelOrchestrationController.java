@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * 模型编排与系统集成主控接口 (Model Orchestration & System Integration API)
+ * 职责：接收外部数字孪生主控系统的推送（Webhook）、管控模型运行编排、以及数据拉取与推送。
+ */
 @RestController
 @RequestMapping("/api/v1/orchestration")
 public class ModelOrchestrationController {
@@ -29,26 +33,26 @@ public class ModelOrchestrationController {
     }
 
     // ========================================================================
-    // 接口 1：批量数据更新通知接口 (Data Update Notification)
-    // 🔥 终极形态：直接接收 List<TSState>，彻底抛弃 DataUpdatePacket 和 JsonNode 解析
+    // 接口 1：系统集成与批量数据更新通知接口 (Webhook / Notification)
+    // 🔥 统一入口：直接接收 List<TSState>，彻底抛弃冗余的 Controller 和 DTO
     // ========================================================================
     @PostMapping("/notify-batch")
     public ResponseEntity<String> onDataUpdateNotification(@RequestBody List<TSState> incomingStates) {
 
         if (incomingStates == null || incomingStates.isEmpty()) {
-            return ResponseEntity.badRequest().body("Notification states are empty or invalid");
+            return ResponseEntity.badRequest().body("REJECTED: Notification states are empty or invalid");
         }
 
-        log.info("📡 [Controller] 收到来自数据端的 {} 个 TSState 状态广播包", incomingStates.size());
+        log.info("📡 [Controller] 收到来自数字孪生主系统的 {} 个 TSState 状态广播包", incomingStates.size());
 
-        // 直接将标准协议包转交给数据服务处理（它将负责把这些状态推入事件总线）
+        // 直接将标准协议包转交给数据服务处理（它将负责把这些状态推入事件总线，唤醒调度引擎）
         dataService.notifyDataArrivals(incomingStates);
 
         return ResponseEntity.ok("ACK: Batch TSState update signals received and published.");
     }
 
     // ========================================================================
-    // 接口 2：获取活跃任务列表 (供前端看板展示)
+    // 接口 2：获取活跃任务列表 (供前端看板或外部系统监控展示)
     // ========================================================================
     @GetMapping("/tasks/active")
     public ResponseEntity<List<TaskStatusDTO>> getActiveTasks() {
@@ -60,7 +64,7 @@ public class ModelOrchestrationController {
     // ========================================================================
     @PostMapping("/fetch")
     public ResponseEntity<TSDataBlock> fetchData(@RequestBody TSShell shell) {
-        log.info("🔍 [接口3-Fetch] 向数据端查询真实数据: Feature={}, Time={}",
+        log.info("🔍 [接口3-Fetch] 向数据层查询真实时空张量数据: Feature={}, Time={}",
                 shell.getFeatureId(), shell.getTOrigin());
 
         try {
@@ -80,7 +84,7 @@ public class ModelOrchestrationController {
     // ========================================================================
     @PostMapping("/push")
     public ResponseEntity<String> pushData(@RequestBody TSDataBlock block) {
-        log.info("💾 [接口4-Push] 推送计算产物至数据端: Feature={}", block.getFeatureId());
+        log.info("💾 [接口4-Push] 推送计算产物至数据层: Feature={}", block.getFeatureId());
 
         try {
             dataService.pushData(block.getFeatureId(), block);

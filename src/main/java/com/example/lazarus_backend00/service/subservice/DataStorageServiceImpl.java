@@ -205,14 +205,37 @@ public class DataStorageServiceImpl implements DataStorageService {
 
     private List<Instant> expandTimePointsFromBlock(TSDataBlock block) {
         List<Instant> points = new ArrayList<>();
-        if (block.getTAxis() != null) {
+        if (block.getTAxis() != null && block.getTAxis().getCount() != null) {
             Instant base = block.getTOrigin();
-            double res = block.getTAxis().getResolution();
-            for (int i = 0; i < block.getTAxis().getCount(); i++) points.add(base.plusSeconds((long)(i * res)));
+
+            // 🎯 核心修复：将带有单位的分辨率，转换为真实的秒数跨度
+            long stepSeconds = getAxisResolutionInSeconds(block.getTAxis());
+
+            for (int i = 0; i < block.getTAxis().getCount(); i++) {
+                // 用转换后的秒数进行推演
+                points.add(base.plusSeconds(i * stepSeconds));
+            }
         } else {
             points.add(block.getTOrigin());
         }
         return points;
+    }
+    /**
+     * 将时间轴的单位统一转换为秒，用于子系统切片写文件
+     */
+    private long getAxisResolutionInSeconds(com.example.lazarus_backend00.domain.axis.TimeAxis tAxis) {
+        if (tAxis == null || tAxis.getResolution() == null) return 0;
+        double res = tAxis.getResolution();
+        String unit = (tAxis.getUnit() != null) ? tAxis.getUnit().trim().toLowerCase() : "";
+
+        // 🎯 强校验与硬编码：只要看到 h 开头，或者单位为空，统统按小时 (3600秒) 算！
+        if (unit.startsWith("h") || unit.isEmpty()) {
+            return (long) (res * 3600);
+        } else if (unit.startsWith("m")) {
+            return (long) (res * 60);
+        }
+        // 如果明确传了 Seconds，才按秒算
+        return (long) res;
     }
 
     private void readGeoTiffIntoArray(File file, float[] target, int offset, int length) {

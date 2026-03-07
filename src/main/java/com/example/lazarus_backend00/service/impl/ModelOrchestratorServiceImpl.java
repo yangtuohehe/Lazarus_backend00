@@ -1,6 +1,5 @@
 package com.example.lazarus_backend00.service.impl;
 
-
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
@@ -28,14 +27,14 @@ import java.util.stream.Collectors;
 public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
     private static final Logger log = LoggerFactory.getLogger(ModelOrchestratorServiceImpl.class);
-    // 🔥 新增：配置类实例
     private final ModelPoolConfig poolConfig;
     private final DataPreloadService dataPreloadService;
     private final DataService dataService;
     private final ModelContainerPool containerPool;
     private final Object dataMemoryLock = new Object();
-    // 注意：不再需要直接依赖 EventTrigger，因为任务是由 DataService 传进来的
+
     private final Map<Long, TaskStatusDTO> activeTasksMap = new ConcurrentHashMap<>();
+
     public ModelOrchestratorServiceImpl(DataPreloadService dataPreloadService,
                                         DataService dataService,
                                         @Lazy ModelContainerPool containerPool,
@@ -46,30 +45,22 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
         this.poolConfig = poolConfig;
     }
 
-    // ========================================================================
-    // 1. 任务分发与执行 (Dispatch & Execute)
-    // ========================================================================
-
-
     @Override
     @Async("taskExecutor")
     public void dispatchTask(ExecutableTask task) {
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();
 
-        // 🌟 1. 初始化任务状态，放入 PENDING
         TaskStatusDTO statusTracker = new TaskStatusDTO(
-                taskId, runtimeId, "PENDING", Instant.now(), "等待内存准入..."
+                taskId, runtimeId, "PENDING", Instant.now(), "Waiting for memory admission..."
         );
         activeTasksMap.put(taskId, statusTracker);
 
         try {
-            // 🌟 2. 内存准入检查
             waitForSufficientMemory(taskId, statusTracker);
 
-            // 🌟 3. 更新状态：准备数据
             statusTracker.setStatus("PREPARING_DATA");
-            statusTracker.setMessage("正在向数据系统索要张量数据...");
+            statusTracker.setMessage("Requesting tensor data from data subsystem...");
 
             List<TSShell> requiredShells = task.getAllInputShells();
             if (!requiredShells.isEmpty()) {
@@ -81,24 +72,46 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
             List<List<TSDataBlock>> structuredInputs = assembleInputGroups(task, flatInputData);
 
-            // 🌟 4. 更新状态：入池计算
             statusTracker.setStatus("COMPUTING");
-            statusTracker.setMessage("正在容器池内进行计算...");
+            statusTracker.setMessage("Computing in container pool...");
 
+            log.info("🧠 [Orch] Task-{} assembled {} input groups. Entering execution pool...", taskId, structuredInputs.size());
+
+            // =========================================================================
+            // 👇 就是这里！核心替换部分开始 👇
+            // =========================================================================
+
+            // 1. 模型计算
             List<List<TSDataBlock>> structuredResults = containerPool.executeModel(runtimeId, structuredInputs);
 
-            if (structuredResults != null && !structuredResults.isEmpty()) {
-                handleResults(task, structuredResults);
-            }
+            // 确保模型确实返回了数据，没有内部崩溃
+            if (structuredResults == null || structuredResults.isEmpty()) {
+                log.warn("⚠️ [Orch] Task-{} execution returned NULL or EMPTY results! Model failed internally.", taskId);
+            } else {
+                // 2. 像素级过滤（根据 TSState 掩码，把大盘里已有的数据剔除）
+                List<List<TSDataBlock>> finalFilteredResults = task.filterRedundantOutputs(structuredResults);
 
-            // 🌟 5. 成功完成，从活跃任务表中移除 (前端收到列表不含此任务即代表完成)
+                // 3. 检查过滤后是否还有“有效产出”
+                if (finalFilteredResults.isEmpty()) {
+                    // 这种情况很正常：说明这批数据和历史观测数据100%重合，不需要这批仿真数据了
+                    log.info("💤 [Orch] Task-{} results are redundant. All pixels already exist in global state.", taskId);
+                } else {
+                    // 只有真有新数据，才推给存储端
+                    log.info("📦 [Orch] Task-{} filtered. Pushing {} remaining valid ports.", taskId, finalFilteredResults.size());
+                    handleResults(task, finalFilteredResults);
+                    log.info("✅ [Orch] Task-{} results successfully pushed to data subsystem.", taskId);
+                }
+            }
+            // =========================================================================
+            // 👆 核心替换部分结束 👆
+            // =========================================================================
+
             activeTasksMap.remove(taskId);
 
         } catch (Exception e) {
-            log.error("❌ [Orch] Task-{} 执行失败: {}", taskId, e.getMessage());
-            // 发生异常时，保留在列表中展示给前端，状态置为 ERROR
+            log.error("❌ [Orch] Task-{} execution failed: {}", taskId, e.getMessage());
             statusTracker.setStatus("ERROR");
-            statusTracker.setMessage("执行失败: " + e.getMessage());
+            statusTracker.setMessage("Execution failed: " + e.getMessage());
         } finally {
             System.gc();
             synchronized (dataMemoryLock) {
@@ -107,9 +120,6 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
         }
     }
 
-    /**
-     * 检查系统内存，不足则挂起当前线程
-     */
     private void waitForSufficientMemory(long taskId, TaskStatusDTO statusTracker) throws InterruptedException {
         synchronized (dataMemoryLock) {
             while (true) {
@@ -121,65 +131,54 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
                 long thresholdMB = poolConfig.getMinFreeMemoryMb();
 
                 if (actualFreeMB >= thresholdMB) {
-                    log.info("🟢 [内存准入] 可用内存 {} MB >= 阈值，Task-{} 获批", actualFreeMB, taskId);
+                    log.info("🟢 [MemAdmission] Available memory {} MB >= threshold, Task-{} approved.", actualFreeMB, taskId);
                     break;
                 }
 
-                // 更新前端展示的排队信息
-                statusTracker.setMessage(String.format("内存不足 (可用 %d MB)，排队中...", actualFreeMB));
-                log.warn("🟡 [内存拦截] 可用内存 {} MB 不足！Task-{} 等待...", actualFreeMB, taskId);
+                statusTracker.setMessage(String.format("Insufficient memory (Available %d MB), queuing...", actualFreeMB));
+                log.warn("🟡 [MemIntercept] Available memory {} MB is insufficient! Task-{} waiting...", actualFreeMB, taskId);
 
                 dataMemoryLock.wait(5000);
             }
         }
     }
 
-    // ========================================================================
-    // 2. 结果处理 (Result Handling)
-    // ========================================================================
-
     private void handleResults(ExecutableTask task, List<List<TSDataBlock>> structuredResults) {
         List<ExecutableTask.TaskPort> outputPorts = task.getOutputs();
-
-        // 1. 遍历输出端口
         for (int i = 0; i < structuredResults.size(); i++) {
             if (i >= outputPorts.size()) break;
 
             List<TSDataBlock> featureBlocks = structuredResults.get(i);
-
-            // 2. 遍历端口内的每个 Block
             for (TSDataBlock resultBlock : featureBlocks) {
-                // 🔥 核心：将结果推回 DataService
-                // DataService 会负责：缓存 + 远程存盘 + 级联触发
                 dataService.pushData(resultBlock.getFeatureId(), resultBlock);
             }
         }
-        // log.info("✅ [Orch] Task-{} 完成。", task.getTaskId());
     }
-    // 🔥 新增：暴露给 Controller 的方法
+
     @Override
     public List<TaskStatusDTO> getActiveTasks() {
-        // 直接返回 Map 中的所有值
         return new ArrayList<>(activeTasksMap.values());
     }
 
-    // ========================================================================
-    // 3. 辅助方法 (Helpers)
-    // ========================================================================
-
     private List<List<TSDataBlock>> assembleInputGroups(ExecutableTask task, List<TSDataBlock> flatData) {
-        // 建立索引: FeatureID -> Block
-        Map<Integer, TSDataBlock> dataMap = flatData.stream()
-                .collect(Collectors.toMap(TSDataBlock::getFeatureId, Function.identity(), (e, r) -> e));
+        Map<String, TSDataBlock> dataMap = flatData.stream()
+                .collect(Collectors.toMap(
+                        b -> b.getFeatureId() + "_" + (b.getTOrigin() != null ? b.getTOrigin().toEpochMilli() : "0"),
+                        Function.identity(),
+                        (existing, replacement) -> existing
+                ));
 
         List<List<TSDataBlock>> inputGroups = new ArrayList<>();
 
         for (ExecutableTask.TaskPort port : task.getInputs()) {
             List<TSDataBlock> portBlocks = new ArrayList<>();
             for (TSShell shell : port.getAtomicShells()) {
-                TSDataBlock block = dataMap.get(shell.getFeatureId());
+
+                String key = shell.getFeatureId() + "_" + (shell.getTOrigin() != null ? shell.getTOrigin().toEpochMilli() : "0");
+                TSDataBlock block = dataMap.get(key);
+
                 if (block == null) {
-                    throw new IllegalStateException("缺少必要输入数据: Feature " + shell.getFeatureId());
+                    throw new IllegalStateException("Required input data missing: Feature " + shell.getFeatureId() + " (at time: " + shell.getTOrigin() + ")");
                 }
                 portBlocks.add(block);
             }

@@ -10,7 +10,7 @@ import com.example.lazarus_backend00.domain.data.DataState;
 import com.example.lazarus_backend00.domain.data.TSShell;
 import com.example.lazarus_backend00.domain.data.TSState;
 import com.example.lazarus_backend00.service.ModelOrchestratorService;
-import com.example.lazarus_backend00.dto.TaskStatusDTO; // 🔥 引入 DTO
+import com.example.lazarus_backend00.dto.TaskStatusDTO;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
@@ -44,18 +44,21 @@ public class TriggerOrchestrationTest {
             System.out.println("🎯 [编排器拦截] 成功捕获新任务！");
             System.out.println("   ▶️ 任务ID: " + task.getTaskId());
 
-            if (!task.getOutputs().isEmpty() && !task.getOutputs().get(0).getTargetStates().isEmpty()) {
-                Instant taskTime = task.getOutputs().get(0).getTargetStates().get(0).getTOrigin();
-                System.out.println("   ▶️ 任务对应的时间步: " + taskTime);
-                System.out.println("   ▶️ 包含输入端口数: " + task.getInputs().size() + " | 输出端口数: " + task.getOutputs().size());
-                System.out.println("--------------------------------------------------");
+            // 🎯 修复报错点 1：适配新的二维状态列表结构
+            if (!task.getOutputs().isEmpty() && !task.getOutputs().get(0).getTargetStatesPerFeature().isEmpty()) {
+                // 获取第一个输出端口 -> 第一个特征 -> 它的时间序列帧列表 -> 提取第一帧的时间点
+                List<TSState> featureStates = task.getOutputs().get(0).getTargetStatesPerFeature().get(0);
+                if (!featureStates.isEmpty()) {
+                    Instant taskTime = featureStates.get(0).getTOrigin();
+                    System.out.println("   ▶️ 任务对应的时间步: " + taskTime);
+                    System.out.println("   ▶️ 包含输入端口数: " + task.getInputs().size() + " | 输出端口数: " + task.getOutputs().size());
+                    System.out.println("--------------------------------------------------");
+                }
             }
         }
 
-        // 🔥 修复报错 1：实现接口中新增的 getActiveTasks 方法
         @Override
         public List<TaskStatusDTO> getActiveTasks() {
-            // 在单元测试中我们不需要真实查询状态，直接返回空列表即可满足编译要求
             return new ArrayList<>();
         }
     }
@@ -78,12 +81,10 @@ public class TriggerOrchestrationTest {
         );
         List<Parameter> outputs = List.of(createMockParameter("OUTPUT", 1, 4));
 
-// 🔥 修复点：将输入和输出合并为一个完整的模型参数列表
         List<Parameter> allParams = new ArrayList<>();
         allParams.addAll(inputs);
         allParams.addAll(outputs);
 
-        // 🔥 将完整的 allParams 注册进触发器
         trigger.registerModel(100, allParams, Duration.ofHours(1), Duration.ofHours(24));
 
         Instant t3 = Instant.parse("2026-03-05T03:00:00Z");
@@ -119,7 +120,11 @@ public class TriggerOrchestrationTest {
         assertEquals(2, mockOrchestrator.dispatchedTasks.size(), "任务数不正确，t5 没有被成功剔除！");
 
         boolean hasT5 = mockOrchestrator.dispatchedTasks.stream().anyMatch(task -> {
-            Instant time = task.getOutputs().get(0).getTargetStates().get(0).getTOrigin();
+            // 🎯 修复报错点 2：在断言中适配新的二维状态列表结构
+            List<TSState> featureStates = task.getOutputs().get(0).getTargetStatesPerFeature().get(0);
+            if (featureStates.isEmpty()) return false;
+
+            Instant time = featureStates.get(0).getTOrigin();
             return time.equals(t5);
         });
         assertFalse(hasT5, "致命错误：生成了 t5 的冗余计算任务！");
@@ -135,11 +140,13 @@ public class TriggerOrchestrationTest {
 
         SpaceAxisX xAxis = new SpaceAxisX(10.0, "Degrees", 1.0, "Degrees");
         SpaceAxisY yAxis = new SpaceAxisY(10.0, "Degrees", 1.0, "Degrees");
+
+        // 模拟一个单步长的时间轴 (count = 1)
         TimeAxis tAxis = new TimeAxis(3600.0, "Seconds", 3600.0, "Seconds");
+        tAxis.setCount(1);
 
         List<Axis> axes = Arrays.asList(tAxis, yAxis, xAxis);
 
-        // 🔥 修复报错 2：直接使用带参数的构造函数创建 Feature
         Feature feature = new Feature(featureId, "Feature-" + featureId);
 
         return new Parameter(ioType, tensorOrder, origin, axes, List.of(feature));
@@ -149,8 +156,11 @@ public class TriggerOrchestrationTest {
     // 辅助工具：生成对应的满状态 TSState
     // =========================================================
     private TSState createMockState(int featureId, Instant time, DataState state) {
+        TimeAxis tAxis = new TimeAxis(3600.0, "Seconds", 3600.0, "Seconds");
+        tAxis.setCount(1);
+
         TSShell shell = new TSShell.Builder(featureId)
-                .time(time, new TimeAxis(3600.0, "Seconds", 3600.0, "Seconds"))
+                .time(time, tAxis)
                 .x(0.0, new SpaceAxisX(10.0, "Degrees", 1.0, "Degrees"))
                 .y(0.0, new SpaceAxisY(10.0, "Degrees", 1.0, "Degrees"))
                 .build();

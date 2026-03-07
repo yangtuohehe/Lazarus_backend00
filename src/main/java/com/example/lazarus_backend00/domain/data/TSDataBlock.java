@@ -15,11 +15,13 @@ import java.util.List;
  * 继承自 TSShell，仅保留数据和 Batch 相关的特有属性，空间维度全权交由父类管理。
  */
 public class TSDataBlock extends TSShell {
+    public TSDataBlock() {
+    }
 
     // ================== 核心数据 (子类特有) ==================
-    private final float[] data;
-    private final int batchSize;
-    private final List<Instant> batchTOrigins;
+    private  float[] data;
+    private  int batchSize;
+    private  List<Instant> batchTOrigins;
 
     /**
      * 核心构造：接收一个父类外壳，加上自己的特有数据
