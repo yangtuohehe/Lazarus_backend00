@@ -1,33 +1,134 @@
-sequenceDiagram
-    participant Clock as GlobalClock
-    participant SubSys as DataSubsystem (Service)
-    participant MainAPI as SystemIntegration (Controller)
-    participant DataSvc as DataService
-    participant Trigger as ModelEventTrigger
-    participant Orch as Orchestrator
-    participant Pool as ContainerPool
-    participant SubAPI as DataSubsystem (Controller)
-    participant Storage as DataStorage
+@startuml
 
-    Note over Clock, Storage: Phase 1: Data Generation
-    Clock->>SubSys: 1. Tick (Event)
-    SubSys->>SubSys: 2. Copy TIF (Generate Real Data)
-    SubSys->>MainAPI: 3. HTTP POST /notify-arrival
+!theme plain
+top to bottom direction
+skinparam linetype ortho
 
-    Note over MainAPI, Pool: Phase 2: Compute
-    MainAPI->>DataSvc: 4. notifyDataArrival()
-    DataSvc->>Trigger: 5. onDataUpdate(State=1)
-    Trigger->>Orch: 6. Return Tasks
-    Orch->>DataSvc: 7. Fetch Input Data
-    DataSvc->>SubAPI: 8. HTTP POST /fetch
-    SubAPI-->>DataSvc: Return DataBlock
-    Orch->>Pool: 9. executeModel()
-    Pool-->>Orch: Return ResultBlock
+class dynamic_process_model {
+   model_name: varchar(255)
+   model_source_paper: varchar(255)
+   model_author: varchar(255)
+   model_summary: text
+   model_file: bytea
+   created_at: timestamp
+   updated_at: timestamp
+   version: integer
+   id: integer
+}
+class node1 as "feature  /* 要素表 */" {
+   feature_name: varchar(255)
+   created_at: timestamp
+   updated_at: timestamp
+   id: integer
+}
+class node6 as "feature_parameter  /* 要素-参数关联表 */" {
+   feature_id: integer
+   parameter_id: integer
+   feature_layer: integer
+   dimension_index: integer
+   id: integer
+}
+class geography_columns {
+   f_table_catalog: name
+   f_table_schema: name
+   f_table_name: name
+   f_geography_column: name
+   coord_dimension: integer
+   srid: integer
+   type: text
+}
+class geometry_columns {
+   f_table_catalog: varchar(256)
+   f_table_schema: name
+   f_table_name: name
+   f_geometry_column: name
+   coord_dimension: integer
+   srid: integer
+   type: varchar(30)
+}
+class model_interface {
+   processmodel_id: integer
+   interface_name: varchar(50)
+   is_default: boolean
+   created_at: timestamp
+   updated_at: timestamp
+   interface_summary: text
+   id: integer
+}
+class model_runtime_env {
+   system_env: varchar(255)
+   library_env: jsonb
+   required_memory: integer
+   is_active: boolean
+   created_at: timestamp
+   updated_at: timestamp
+   env_id: integer
+}
+class node4 as "parameter  /* 参数表 */" {
+   interface_id: integer
+   io_type: varchar(50)
+   origin_point  /* 原点 (Geometry) */: geometry
+   coverage_geom  /* 覆盖范围 (Geometry) */: geometry
+   tensor_order: integer
+   created_at: timestamp
+   updated_at: timestamp
+   o_time_step: integer
+   id  /* 主键 */: integer
+}
+class node11 as "space_axis_x  /* 空间X轴定义 */" {
+   parameter_id: integer
+   count  /* 行数/点数 */: integer
+   resolution  /* 分辨率 */: double precision
+   unit: varchar(50)
+   created_at: timestamp
+   updated_at: timestamp
+   dimension_index  /* 维度位置(如:0,1,2) */: integer
+   id: integer
+}
+class node9 as "space_axis_y  /* 空间Y轴定义 */" {
+   parameter_id: integer
+   count: integer
+   resolution: double precision
+   unit: varchar(50)
+   created_at: timestamp
+   updated_at: timestamp
+   dimension_index  /* 维度位置 */: integer
+   id: integer
+}
+class node8 as "space_axis_z  /* 空间Z轴定义 */" {
+   parameter_id: integer
+   count: integer
+   resolution: double precision
+   unit: varchar(50)
+   created_at: timestamp
+   updated_at: timestamp
+   dimension_index  /* 维度位置 */: integer
+   id: integer
+}
+class spatial_ref_sys {
+   auth_name: varchar(256)
+   auth_srid: integer
+   srtext: varchar(2048)
+   proj4text: varchar(2048)
+   srid: integer
+}
+class node2 as "time_axis  /* 时间轴定义 */" {
+   parameter_id: integer
+   count: integer
+   resolution: double precision
+   unit: varchar(50)
+   created_at: timestamp
+   updated_at: timestamp
+   dimension_index  /* 维度位置 */: integer
+   id: integer
+}
 
-    Note over Orch, Storage: Phase 3: Return & Loop
-    Orch->>DataSvc: 10. pushData(ResultBlock)
-    DataSvc->>DataSvc: 11. Cache Put
-    DataSvc->>SubAPI: 12. HTTP POST /ingest-calc
-    SubAPI->>Storage: 13. Write "-ls.tif" to Disk
-    DataSvc->>Trigger: 14. onDataUpdate(State=2)
-    Trigger-->>Orch: 15. New Tasks (Cascade...)
+node6                  -[#595959,plain]-^  node1                 : "feature_id:id"
+node6                  -[#595959,plain]-^  node4                 : "parameter_id:id"
+model_interface        -[#595959,plain]-^  dynamic_process_model : "processmodel_id:id"
+node4                  -[#595959,plain]-^  model_interface       : "interface_id:id"
+node11                 -[#595959,plain]-^  node4                 : "parameter_id:id"
+node9                  -[#595959,plain]-^  node4                 : "parameter_id:id"
+node8                  -[#595959,plain]-^  node4                 : "parameter_id:id"
+node2                  -[#595959,plain]-^  node4                 : "parameter_id:id"
+@enduml

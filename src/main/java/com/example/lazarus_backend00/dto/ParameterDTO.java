@@ -17,9 +17,18 @@ public class ParameterDTO {
     // 嵌套结构
     private List<AxisDTO> axis;
     private List<FeatureDTO> features;
-
+    // 新增：时间原点偏移量
+    private Integer oTimeStep;
     public String getIoType() {
         return ioType;
+    }
+
+    public Integer getoTimeStep() {
+        return oTimeStep;
+    }
+
+    public void setoTimeStep(Integer oTimeStep) {
+        this.oTimeStep = oTimeStep;
     }
 
     public void setIoType(String ioType) {

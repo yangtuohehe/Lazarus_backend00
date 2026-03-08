@@ -131,13 +131,7 @@ public class DjlPytorchModelContainer implements ModelContainer {
         List<List<TSDataBlock>> allOutputs = new ArrayList<>();
         List<Parameter> outputParams = getSortedOutputParameters();
 
-        // 动态计算预测输出的 TOrigin
-        Instant outputTOrigin = templateBlock.getTOrigin();
-        TimeAxis inputTAxis = templateBlock.getTAxis();
-        if (outputTOrigin != null && inputTAxis != null && inputTAxis.getCount() != null) {
-            long totalInputDurationSec = inputTAxis.getCount() * getAxisResolutionInSeconds(inputTAxis);
-            outputTOrigin = outputTOrigin.plusSeconds(totalInputDurationSec);
-        }
+        // ❌ 移除了原先在这里“粗暴”累加 totalInputDurationSec 的旧逻辑
 
         int ndIndex = 0;
         for (Parameter param : outputParams) {
@@ -166,7 +160,8 @@ public class DjlPytorchModelContainer implements ModelContainer {
                         .featureId(f.getId())
                         .data(slice);
 
-                applyOutputMetadata(param, outputTOrigin, builder);
+                // ✅ 关键更改：将整个 templateBlock 传给下游，让其利用 oTimeStep 进行绝对精度的偏移计算
+                applyOutputMetadata(param, templateBlock, builder);
                 groupBlocks.add(builder.build());
             }
             allOutputs.add(groupBlocks);
@@ -174,13 +169,32 @@ public class DjlPytorchModelContainer implements ModelContainer {
         return allOutputs;
     }
 
-    private void applyOutputMetadata(Parameter param, Instant outputTOrigin, TSDataBlock.Builder builder) {
+    // ================== 替换 2：元数据注入方法 ==================
+    private void applyOutputMetadata(Parameter param, TSDataBlock templateBlock, TSDataBlock.Builder builder) {
+
+        Instant baseTOrigin = templateBlock.getTOrigin();
+
         // 1. 注入输出时间轴
-        if (param.getTimeAxis() != null && outputTOrigin != null) {
-            builder.time(outputTOrigin, param.getTimeAxis());
+        if (param.getTimeAxis() != null && baseTOrigin != null) {
+            Instant actualOutputTime = baseTOrigin;
+
+            if (param.getoTimeStep() != null) {
+                // 🌟 新核心逻辑：输出时间 = 模型的逻辑零点(输入时间的起点) + (oTimeStep偏移步数 * 输出时间轴的物理分辨率步长)
+                long offsetSeconds = param.getoTimeStep() * getAxisResolutionInSeconds(param.getTimeAxis());
+                actualOutputTime = baseTOrigin.plusSeconds(offsetSeconds);
+            } else {
+                // 🔙 兼容回退逻辑：如果数据库中该参数没配 oTimeStep，默认假定它紧接在输入数据的结尾
+                TimeAxis inputTAxis = templateBlock.getTAxis();
+                if (inputTAxis != null && inputTAxis.getCount() != null) {
+                    long totalInputDurationSec = inputTAxis.getCount() * getAxisResolutionInSeconds(inputTAxis);
+                    actualOutputTime = baseTOrigin.plusSeconds(totalInputDurationSec);
+                }
+            }
+
+            builder.time(actualOutputTime, param.getTimeAxis());
         }
 
-        // 2. 注入输出空间轴
+        // 2. 注入输出空间轴 (原有代码保持不变)
         if (param.getAxisList() != null) {
             for (com.example.lazarus_backend00.domain.axis.Axis axis : param.getAxisList()) {
                 if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisX) {

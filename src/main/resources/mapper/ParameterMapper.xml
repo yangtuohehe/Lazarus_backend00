@@ -12,6 +12,7 @@
         <result column="tensorOrder" property="tensorOrder" />
         <result column="originPoint" property="originPoint" typeHandler="com.example.lazarus_backend00.infrastructure.config.JtsGeometryTypeHandler"/>
         <result column="coverageGeom" property="coverageGeom" typeHandler="com.example.lazarus_backend00.infrastructure.config.JtsGeometryTypeHandler"/>
+        <result column="oTimeStep" property="oTimeStep" />
         <result column="createdAt" property="createdAt" />
         <result column="updatedAt" property="updatedAt" />
     </resultMap>
@@ -26,6 +27,7 @@
             origin_point,
             coverage_geom,
             tensor_order,
+            o_time_step,
             created_at,
             updated_at
         )
@@ -35,6 +37,7 @@
                    #{originPoint},
                    #{coverageGeom},
                    #{tensorOrder},
+                   #{oTimeStep},
                    #{createdAt},
                    #{updatedAt}
                )
@@ -49,6 +52,7 @@
 
             ST_AsBinary(origin_point)  AS originPoint,
             ST_AsBinary(coverage_geom) AS coverageGeom,
+            o_time_step AS oTimeStep,
 
             created_at    AS createdAt,
             updated_at    AS updatedAt
@@ -65,6 +69,7 @@
 
         ST_AsBinary(origin_point)  AS originPoint,
         ST_AsBinary(coverage_geom) AS coverageGeom,
+        o_time_step AS oTimeStep,
 
         created_at    AS createdAt,
         updated_at    AS updatedAt
@@ -85,6 +90,9 @@
 
             <if test="coverageGeom != null">
                 AND ST_Intersects(coverage_geom, #{coverageGeom})
+            </if>
+            <if test="oTimeStep != null">
+                AND o_time_step = #{oTimeStep}
             </if>
         </where>
         ORDER BY created_at DESC

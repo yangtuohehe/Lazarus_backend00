@@ -311,7 +311,15 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
             List<Feature> featureList = fetchFeatures(entity.getId());
             Point origin = (entity.getOriginPoint() instanceof Point) ? (Point) entity.getOriginPoint() : null;
 
-            result.add(new Parameter(entity.getIoType(), entity.getTensorOrder(), origin, entity.getCoverageGeom(), axisList, featureList));
+            result.add(new Parameter(
+                    entity.getIoType(),
+                    entity.getTensorOrder(),
+                    entity.getoTimeStep(), // <--- 补上我们新增的时间原点偏移量
+                    origin,
+                    entity.getCoverageGeom(),
+                    axisList,
+                    featureList
+            ));
         }
         return result;
     }

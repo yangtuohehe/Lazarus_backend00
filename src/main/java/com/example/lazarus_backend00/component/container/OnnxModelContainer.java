@@ -118,13 +118,6 @@ public class OnnxModelContainer implements ModelContainer {
         List<List<TSDataBlock>> allOutputs = new ArrayList<>();
         List<Parameter> outputParams = getSortedOutputParameters();
 
-        // 动态计算预测输出的 TOrigin
-        Instant outputTOrigin = templateBlock.getTOrigin();
-        TimeAxis inputTAxis = templateBlock.getTAxis();
-        if (outputTOrigin != null && inputTAxis != null && inputTAxis.getCount() != null) {
-            long totalInputDurationSec = inputTAxis.getCount() * getAxisResolutionInSeconds(inputTAxis);
-            outputTOrigin = outputTOrigin.plusSeconds(totalInputDurationSec);
-        }
 
         Iterator<Map.Entry<String, OnnxValue>> resultIter = results.iterator();
         for (Parameter param : outputParams) {
@@ -156,7 +149,8 @@ public class OnnxModelContainer implements ModelContainer {
                             .featureId(f.getId())
                             .data(slice);
 
-                    applyOutputMetadata(param, outputTOrigin, builder);
+                    applyOutputMetadata(param, templateBlock, builder); // <--- 🔥 传入整个 templateBlock
+                    portOutputs.add(builder.build());
                     portOutputs.add(builder.build());
                 }
                 allOutputs.add(portOutputs);
@@ -167,12 +161,33 @@ public class OnnxModelContainer implements ModelContainer {
         return allOutputs;
     }
 
-    private void applyOutputMetadata(Parameter param, Instant outputTOrigin, TSDataBlock.Builder builder) {
-        if (param.getTimeAxis() != null && outputTOrigin != null) {
-            builder.time(outputTOrigin, param.getTimeAxis());
+    private void applyOutputMetadata(Parameter param, TSDataBlock templateBlock, TSDataBlock.Builder builder) {
+
+        Instant baseTOrigin = templateBlock.getTOrigin();
+
+        // 1. 注入输出时间轴
+        if (param.getTimeAxis() != null && baseTOrigin != null) {
+            Instant actualOutputTime = baseTOrigin;
+
+            if (param.getoTimeStep() != null) {
+                // 🌟🌟🌟 新核心逻辑：输出时间 = 模型逻辑零点(输入的起点) + (oTimeStep偏移量 * 输出时间轴的步长)
+                long offsetSeconds = param.getoTimeStep() * getAxisResolutionInSeconds(param.getTimeAxis());
+                actualOutputTime = baseTOrigin.plusSeconds(offsetSeconds);
+            } else {
+                // 🔙 兼容回退逻辑：如果数据库没配 oTimeStep，默认假定它接在输入数据的屁股后面
+                TimeAxis inputTAxis = templateBlock.getTAxis();
+                if (inputTAxis != null && inputTAxis.getCount() != null) {
+                    long totalInputDurationSec = inputTAxis.getCount() * getAxisResolutionInSeconds(inputTAxis);
+                    actualOutputTime = baseTOrigin.plusSeconds(totalInputDurationSec);
+                }
+            }
+
+            builder.time(actualOutputTime, param.getTimeAxis());
         }
+
+        // 2. 注入输出空间轴 (原有代码保持不变)
         if (param.getAxisList() != null) {
-            for (Axis axis : param.getAxisList()) {
+            for (com.example.lazarus_backend00.domain.axis.Axis axis : param.getAxisList()) {
                 if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisX) {
                     builder.x(param.getOriginPoint().getX(), (com.example.lazarus_backend00.domain.axis.SpaceAxisX) axis);
                 } else if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisY) {

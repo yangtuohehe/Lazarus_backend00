@@ -20,6 +20,7 @@ public class Parameter {
 
     private final String ioType;
     private final Integer tensorOrder;//说明这个参数属于第几个张量
+    private final Integer oTimeStep; // <--- 🔥 新增字段
     private final Point originPoint;
 
     // 只读属性，由内部计算得出，支持 Point, Polygon(2D), Polygon(3D)
@@ -34,12 +35,14 @@ public class Parameter {
     public Parameter(
             String ioType,
             Integer tensorOrder,
+            Integer oTimeStep, // <--- 🔥 新增入参
             Point originPoint,
             List<Axis> axisList,
             List<Feature> featureList
     ) {
         this.ioType = ioType;
         this.tensorOrder = tensorOrder;
+        this.oTimeStep = oTimeStep; // <--- 🔥 赋值
         this.originPoint = originPoint;
         this.axisList = axisList;
         this.featureList = featureList;
@@ -48,9 +51,14 @@ public class Parameter {
         this.coverageGeom = calculateCoverage(originPoint, axisList);
     }
 
+    public Integer getoTimeStep() {
+        return oTimeStep;
+    }
+
     public Parameter(
             String ioType,
             Integer tensorOrder,
+            Integer oTimeStep, // <--- 🔥 新增入参
             Point originPoint,
             Geometry coverageGeom, // <--- 🔥 直接接收数据库的值
             List<Axis> axisList,
@@ -59,7 +67,7 @@ public class Parameter {
         this.ioType = ioType;
         this.tensorOrder = tensorOrder;
         this.originPoint = originPoint;
-
+        this.oTimeStep = oTimeStep; // <--- 🔥 赋值
         // 🔥 核心区别：直接赋值，不进行 calculateCoverage 计算
         this.coverageGeom = coverageGeom;
 

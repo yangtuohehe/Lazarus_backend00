@@ -20,8 +20,17 @@ public class ParameterEntity {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-
+    // 新增：时间原点偏移量（时间步）
+    private Integer oTimeStep;
     // -------- getter / setter --------
+
+    public Integer getoTimeStep() {
+        return oTimeStep;
+    }
+
+    public void setoTimeStep(Integer oTimeStep) {
+        this.oTimeStep = oTimeStep;
+    }
 
     public Integer getId() {
         return id;

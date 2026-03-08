@@ -229,7 +229,7 @@ public class ModelSelectServiceImpl implements ModelSelectService {
                 for (ParameterEntity param : parameters) {
                     Map<String, Object> paramMap = new HashMap<>();
                     paramMap.put("ioType", param.getIoType());
-
+                    paramMap.put("oTimeStep", param.getoTimeStep());
                     // 🌟 核心：将 PostGIS 存的 Geometry 还原拆解为明文的 Lon 和 Lat
                     if (param.getOriginPoint() != null) {
                         // 强制转换为 Point，并提取 X 和 Y 放入 Map 中
@@ -328,7 +328,7 @@ public class ModelSelectServiceImpl implements ModelSelectService {
                     Map<String, Object> paramMap = new HashMap<>();
                     paramMap.put("parameterId", param.getId());
                     paramMap.put("ioType", param.getIoType());
-
+                    paramMap.put("oTimeStep", param.getoTimeStep());
                     // 自动转 GeoJSON (由 Jackson JtsModule 支持)
                     paramMap.put("originPoint", param.getOriginPoint());
                     paramMap.put("coverageGeom", param.getCoverageGeom());

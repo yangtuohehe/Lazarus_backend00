@@ -149,7 +149,7 @@ public class TriggerOrchestrationTest {
 
         Feature feature = new Feature(featureId, "Feature-" + featureId);
 
-        return new Parameter(ioType, tensorOrder, origin, axes, List.of(feature));
+        return new Parameter(ioType, tensorOrder, 0, origin, axes, List.of(feature));
     }
 
     // =========================================================
