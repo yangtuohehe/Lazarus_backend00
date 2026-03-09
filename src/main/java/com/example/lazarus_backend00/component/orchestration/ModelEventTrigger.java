@@ -38,8 +38,45 @@ public class ModelEventTrigger {
 
     // 注意：去掉了 Duration 参数
     public void registerModel(int runtimeId, List<Parameter> params) {
+        log.info("============== 🔍 模型实例化参数体检 (RuntimeID: {}) ==============", runtimeId);
+//// 🎯 核心修复：对所有的 Parameter 进行深度克隆，特别是轴对象，防止内存污染
+//        List<Parameter> clonedParams = new ArrayList<>();
+//        for (Parameter p : params) {
+//            Parameter cp = new Parameter(p); // 假设你有拷贝构造，如果没有，请确保轴对象是 new 出来的
+//            if (p.getTimeAxis() != null) {
+//                // 强制新建一个时间轴实例，物理隔离！
+//                TimeAxis originalTa = p.getTimeAxis();
+//                TimeAxis newTa = new TimeAxis(originalTa.getResolution(), originalTa.getUnit(),
+//                        originalTa.getResolution(), originalTa.getUnit());
+//                newTa.setCount(originalTa.getCount());
+//                newTa.setType(originalTa.getType());
+//                cp.setTimeAxis(newTa);
+//            }
+//            clonedParams.add(cp);
+//        }
         ModelTriggerContext ctx = new ModelTriggerContext(runtimeId, params);
         registry.put(runtimeId, ctx);
+
+        // 🎯 打印输入参数
+        log.info("📥 [(INPUT)]：");
+        for (Parameter p : ctx.getInputParams()) {
+            TimeAxis t = p.getTimeAxis();
+            String resStr = (t != null) ? t.getResolution() + " " + t.getUnit() : "No time D";
+            int count = (t != null && t.getCount() != null) ? t.getCount() : 1;
+            log.info("   -> TensorOrder: {} | feature count: {} | time(Count): {} | radition: {}",
+                    p.getTensorOrder(), p.getFeatureList().size(), count, resStr);
+        }
+
+        // 🎯 打印输出参数
+        log.info("📤 [(OUTPUT)]：");
+        for (Parameter p : ctx.getOutputParams()) {
+            TimeAxis t = p.getTimeAxis();
+            String resStr = (t != null) ? t.getResolution() + " " + t.getUnit() : "No time D";
+            int count = (t != null && t.getCount() != null) ? t.getCount() : 1;
+            log.info("   -> TensorOrder: {} | feature count: {} | time(Count): {} | radition: {}",
+                    p.getTensorOrder(), p.getFeatureList().size(), count, resStr);
+        }
+        log.info("====================================================================");
 
         for (Parameter p : params) {
             for (Feature f : p.getFeatureList()) {
@@ -52,6 +89,8 @@ public class ModelEventTrigger {
     public void onVirtualTimeTick(VirtualTimeTickEvent event) {
         this.currentPhysicalTime = event.getVirtualTime();
         scanAndDispatch();
+        // 👉 加入打印
+        printGlobalTimelineDashboard();
     }
 
     @EventListener
@@ -64,6 +103,8 @@ public class ModelEventTrigger {
             }
         }
         scanAndDispatch();
+        // 👉 加入打印
+        printGlobalTimelineDashboard();
     }
 
     // ===================================================================================
@@ -334,5 +375,50 @@ public class ModelEventTrigger {
         } else {
             log.warn("⚠️ [Trigger] Model not found when unregistering. RuntimeID: {}", runtimeId);
         }
+    }
+
+    // ===================================================================================
+    // 🌍 [上帝视角] 打印真正的全局时间轴数据状态大盘 (跟随物理时钟推进)
+    // ===================================================================================
+    private void printGlobalTimelineDashboard() {
+        System.out.println("\n================ 🌍 孪生沙盘：时间轴数据状态大盘 ================");
+        System.out.println("⏰ 当前数字孪生系统时钟: " + currentPhysicalTime);
+
+        Set<Integer> allFeatures = new TreeSet<>(featureRouterMap.keySet());
+        if (allFeatures.isEmpty()) {
+            System.out.println("暂无特征注册。");
+            System.out.println("=================================================================\n");
+            return;
+        }
+
+        // 往前追溯 48 小时，一直打印到当前的最新时刻 (哪怕没有数据，也要把坑位打出来！)
+        Instant startT = currentPhysicalTime.minusSeconds(48 * 3600);
+
+        for (Instant t = startT; !t.isAfter(currentPhysicalTime); t = t.plusSeconds(3600)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("🗓️ 时刻: %s | ", t.toString()));
+
+            for (Integer fId : allFeatures) {
+                String status = "⚪ WAITING(0) [空缺]";
+                // 去沙盘里查：这个时刻到底有没有数据？
+                if (featureRouterMap.get(fId) != null) {
+                    for (ModelTriggerContext ctx : featureRouterMap.get(fId)) {
+                        TSState state = ctx.getLocalState(fId, t);
+                        if (state != null) {
+                            if (state.hasReplacedData()) {
+                                status = "🟢 REPLACED(2) [实测]";
+                                break;
+                            } else if (!state.hasHoles()) {
+                                status = "🔵 READY(1) [预测]";
+                                break;
+                            }
+                        }
+                    }
+                }
+                sb.append(String.format("特征%d: %s   ", fId, status));
+            }
+            System.out.println(sb.toString());
+        }
+        System.out.println("=================================================================\n");
     }
 }

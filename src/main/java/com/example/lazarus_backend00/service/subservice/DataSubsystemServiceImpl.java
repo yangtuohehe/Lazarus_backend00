@@ -65,17 +65,12 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
     @EventListener
     public void onVirtualTimeTick(VirtualTimeTickEvent event) {
         Instant currentSystemTime = event.getVirtualTime();
-        if (this.nextBroadcastTime == null) {
-            this.nextBroadcastTime = currentSystemTime.plus(BROADCAST_INTERVAL_HOURS, ChronoUnit.HOURS);
-        }
+
+        // 1. 根据当前最新时钟，拉取对应的数据进入缓冲区
         executeIngestion(currentSystemTime);
 
-        if (!currentSystemTime.isBefore(nextBroadcastTime)) {
-            flushNotificationBuffer();
-            while (!nextBroadcastTime.isAfter(currentSystemTime)) {
-                nextBroadcastTime = nextBroadcastTime.plus(BROADCAST_INTERVAL_HOURS, ChronoUnit.HOURS);
-            }
-        }
+        // 2. 没有任何拦截！只要缓冲区里有数据，立刻向主系统发起广播（Webhook）！
+        flushNotificationBuffer();
     }
 
     @Override

@@ -53,6 +53,34 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();
 
+        // =========================================================================
+        // 🎯 新增日志：打印任务的实际输入和预期输出时间段 (清爽聚合版)
+        // =========================================================================
+        StringBuilder timeLog = new StringBuilder("\n=== Task-" + taskId + " Time Ranges ===\n▶️ Inputs:\n");
+        for (ExecutableTask.TaskPort port : task.getInputs()) {
+            if (!port.getAtomicShells().isEmpty()) {
+                timeLog.append("   - Port ").append(port.getOrder()).append(": ")
+                        .append(formatTimeRange(port.getAtomicShells().get(0))).append("\n");
+            }
+        }
+        timeLog.append("▶️ Expected Outputs:\n");
+        for (ExecutableTask.TaskPort port : task.getOutputs()) {
+            for (List<TSState> featureStates : port.getTargetStatesPerFeature()) {
+                if (!featureStates.isEmpty()) {
+                    TSState firstState = featureStates.get(0);
+                    TSState lastState = featureStates.get(featureStates.size() - 1);
+
+                    String startTime = formatTimeRange(firstState).split(" to ")[0].replace("[", "");
+                    String endTime = formatTimeRange(lastState).split(" to ")[1].replace("]", "");
+
+                    timeLog.append("   - Feature ").append(firstState.getFeatureId()).append(": [")
+                            .append(startTime).append(" to ").append(endTime).append("]\n");
+                }
+            }
+        }
+        timeLog.append("===================================");
+        log.info(timeLog.toString());
+        // =========================================================================
 
         TaskStatusDTO statusTracker = new TaskStatusDTO(
                 taskId, runtimeId, "PENDING", Instant.now(), "Waiting for memory admission..."
@@ -81,8 +109,34 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
             log.info("[Orch] Task-{} assembled {} input groups. Entering execution pool...", taskId, structuredInputs.size());
 
             // =========================================================================
-            // 👇 就是这里！核心替换部分开始 👇
+            // 🕵️ [致命追踪 - 输入侧] 检查交给模型的输入数据是否自带 NaN！
             // =========================================================================
+            boolean hasInputNaN = false;
+            for (int pIdx = 0; pIdx < structuredInputs.size(); pIdx++) {
+                List<TSDataBlock> portBlocks = structuredInputs.get(pIdx);
+                for (TSDataBlock block : portBlocks) {
+                    float[] data = block.getData();
+                    int nanCount = 0;
+                    if (data != null) {
+                        for (float v : data) {
+                            if (Float.isNaN(v)) nanCount++;
+                        }
+                    }
+                    if (nanCount > 0) {
+                        hasInputNaN = true;
+                        System.err.println("\n❌ [致命追踪 - 输入侧] Task-" + taskId + " 查出源头真凶！");
+                        System.err.println("❌ 真相大白：喂给模型的输入数据本身就带毒！输入端口 " + pIdx + " (特征 " + block.getFeatureId() + ") 包含了 " + nanCount + " 个 NaN！");
+                        System.err.println("❌ 结论：这是【数据获取端/补齐逻辑】的问题！请检查数据库里的 .tif 是否有空洞未插值，或者缺失的数据被默认赋成了 NaN！\n");
+                    }
+                }
+            }
+
+            if (!hasInputNaN) {
+                System.out.println("✅ [致命追踪 - 输入侧] Task-" + taskId + " 输入数据体检通过，全部都是合法数字，没有任何 NaN。");
+                System.out.println("✅ 结论：如果最终输出变成了 NaN，那绝对是【ONNX 模型本身】算崩溃了（如除以 0 或权重损坏）！");
+            }
+            // =========================================================================
+
 
             // 1. 模型计算
             List<List<TSDataBlock>> structuredResults = containerPool.executeModel(runtimeId, structuredInputs);
@@ -106,9 +160,6 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
                     log.info("[Orch] Task-{} results successfully pushed to data subsystem.", taskId);
                 }
             }
-            // =========================================================================
-            // 👆 核心替换部分结束 👆
-            // =========================================================================
 
             activeTasksMap.remove(taskId);
 
@@ -189,6 +240,26 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
             inputGroups.add(portBlocks);
         }
         return inputGroups;
+    }
+
+    // =========================================================================
+    // 🛠️ 新增工具方法：根据 TSShell 动态推算并打印时间段 (自带单位换算)
+    // =========================================================================
+    private String formatTimeRange(TSShell shell) {
+        if (shell == null || shell.getTOrigin() == null) return "N/A";
+        if (shell.getTAxis() == null || shell.getTAxis().getCount() == null) return "[" + shell.getTOrigin().toString() + "]";
+
+        double res = shell.getTAxis().getResolution() != null ? shell.getTAxis().getResolution() : 1.0;
+        int count = shell.getTAxis().getCount();
+        String unit = shell.getTAxis().getUnit() != null ? shell.getTAxis().getUnit().trim().toLowerCase() : "s";
+
+        long multiplier = 1;
+        if (unit.startsWith("h")) multiplier = 3600;
+        else if (unit.startsWith("m")) multiplier = 60;
+        else if (unit.startsWith("d")) multiplier = 86400;
+
+        long totalSeconds = (long) (res * count * multiplier);
+        return "[" + shell.getTOrigin().toString() + " to " + shell.getTOrigin().plusSeconds(totalSeconds).toString() + "]";
     }
 
 }
