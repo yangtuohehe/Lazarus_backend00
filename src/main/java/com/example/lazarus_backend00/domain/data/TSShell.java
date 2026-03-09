@@ -156,13 +156,11 @@ public class TSShell {
             return this;
         }
         public TSShell build() {
-            int currentDimIndex = 0;
-            if (this.tAxis != null) this.tAxis.setDimensionIndex(currentDimIndex++);
-            currentDimIndex++;
-            if (this.zAxis != null) this.zAxis.setDimensionIndex(currentDimIndex++);
-            if (this.yAxis != null) this.yAxis.setDimensionIndex(currentDimIndex++);
-            if (this.xAxis != null) this.xAxis.setDimensionIndex(currentDimIndex++);
+            // 🎯 彻底删除自作主张的 setDimensionIndex 逻辑！
+            // 绝不篡改外界传进来的轴对象，只做本分的数据载体！
             return new TSShell(this);
         }
     }
+
+
 }

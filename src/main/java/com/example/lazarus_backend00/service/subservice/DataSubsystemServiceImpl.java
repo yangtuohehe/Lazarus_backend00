@@ -37,7 +37,7 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
 
     // ✅ 修改 1：将地址指向主系统的 SystemIntegrationController
     // 假设您的后端主服务运行在 8080 端口
-    private static final String URL_MAIN_SYSTEM_NOTIFY = "http://localhost:8080/api/v1/system/integration/notify-batch";
+    private static final String URL_MAIN_SYSTEM_NOTIFY = "http://localhost:8080/api/v1/orchestration/notify-batch";
 
     private final RestTemplate restTemplate;
 
@@ -168,34 +168,43 @@ public class DataSubsystemServiceImpl implements DataSubsystemService {
     private TSState createStatePacket(FeatureProfile profile, Instant time, int status) {
 
         // =====================================================================
-        // ⚠️ 请在这里填入您从模型 (id=2) 提取到的真实地理参数！
+        // 真实地理参数填充
         // =====================================================================
 
         // 1. 时间轴参数 (假设模型步长是 1小时 = 3600秒)
         double timeRes = 1.0;
+        TimeAxis tAxis = new TimeAxis(timeRes, "Hours", timeRes, "Hours");
+        tAxis.setType("TIME"); // 🎯 必须显式声明类型
+        tAxis.setCount(1);     // 🎯 单帧数据
 
         // 2. X轴 (经度) 参数
-        double originX = 115.425208;       // 👈 替换为提取到的 originPointLon
-        double resX = 0.009583;            // 👈 替换为提取到的 X轴 resolution
-        int countX = 24;             // 👈 替换为提取到的 X轴 count
-        double spanX = resX * countX; // 您的系统目前 SpaceAxisX 构造函数的第一个参数是跨度(Span)
+        double originX = 115.425208;
+        double resX = 0.009583;
+        int countX = 24;
+        double spanX = resX * countX;
+        SpaceAxisX xAxis = new SpaceAxisX(spanX, "Degrees", resX, "Degrees");
+        xAxis.setType("SPACE_X"); // 🎯 必须显式声明
+        xAxis.setCount(countX);   // 🎯 补上像素数量！
 
         // 3. Y轴 (纬度) 参数
-        double originY = 10.014792;        // 👈 替换为提取到的 originPointLat
-        double resY = 0.009583;            // 👈 替换为提取到的 Y轴 resolution
-        int countY = 24;             // 👈 替换为提取到的 Y轴 count
-        double spanY = resY * countY; // 跨度(Span) = 分辨率 * 节点数
+        double originY = 10.014792;
+        double resY = 0.009583;
+        int countY = 24;
+        double spanY = resY * countY;
+        SpaceAxisY yAxis = new SpaceAxisY(spanY, "Degrees", resY, "Degrees");
+        yAxis.setType("SPACE_Y"); // 🎯 必须显式声明
+        yAxis.setCount(countY);   // 🎯 补上像素数量！
 
         // =====================================================================
 
         // 构建带有真实硬编码参数的 TSShell
         TSShell shell = new TSShell.Builder(profile.featureId)
-                .time(time, new TimeAxis(timeRes, "Hours", timeRes, "Hours"))
-                // 设置真实的原点和轴信息
-                .x(originX, new SpaceAxisX(spanX, "Degrees", resX, "Degrees"))
-                .y(originY, new SpaceAxisY(spanY, "Degrees", resY, "Degrees"))
+                .time(time, tAxis)
+                .x(originX, xAxis)
+                .y(originY, yAxis)
                 .build();
 
+        // 🎯 此时调用工厂，底层 TSState 的构造函数会计算出 24 * 24 = 576 的正确像素量，并将 576 位全部涂满！
         DataState dataState = (status == 2) ? DataState.REPLACED : DataState.READY;
         return TSShellFactory.createTSStateFromShell(shell, dataState);
     }

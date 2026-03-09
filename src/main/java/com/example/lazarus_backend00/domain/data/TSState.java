@@ -80,7 +80,7 @@ public class TSState extends TSShell {
 
     @JsonProperty("readyMask")
     public void setReadyMaskArray(long[] data) {
-        this.readyMask = data != null ? BitSet.valueOf(data) : new BitSet();
+        this.readyMask = (data != null && data.length > 0) ? BitSet.valueOf(data) : new BitSet();
     }
 
     @JsonProperty("replacedMask")
@@ -90,7 +90,7 @@ public class TSState extends TSShell {
 
     @JsonProperty("replacedMask")
     public void setReplacedMaskArray(long[] data) {
-        this.replacedMask = data != null ? BitSet.valueOf(data) : new BitSet();
+        this.replacedMask = (data != null && data.length > 0) ? BitSet.valueOf(data) : new BitSet();
     }
 
     /**

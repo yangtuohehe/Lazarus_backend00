@@ -85,14 +85,8 @@ public class ContainerPoolServiceImpl implements ContainerPoolService {
 
         realExecutionPool.registerContainer(runtimeId, container);
 
-        // 🎯 核心联动：严格按照 Python 原型逻辑，步长锁定 1 小时，扫描窗口 24 小时
         if (modelEventTrigger != null) {
-            modelEventTrigger.registerModel(
-                    runtimeId,
-                    container.getParameterList(),
-                    Duration.ofHours(1),
-                    Duration.ofHours(24)
-            );
+            modelEventTrigger.registerModel(runtimeId, container.getParameterList());
         }
 
         ModelContainerDTO dto = convertInstanceToDTO(runtimeId, container, modelEntity);

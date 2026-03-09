@@ -4,6 +4,7 @@ import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
 import com.example.lazarus_backend00.domain.data.TSShell;
+import com.example.lazarus_backend00.domain.data.TSState;
 import com.example.lazarus_backend00.dto.TaskStatusDTO;
 import com.example.lazarus_backend00.infrastructure.config.ModelPoolConfig;
 import com.example.lazarus_backend00.service.DataPreloadService;
@@ -48,8 +49,10 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
     @Override
     @Async("taskExecutor")
     public void dispatchTask(ExecutableTask task) {
+
         long taskId = task.getTaskId();
         int runtimeId = task.getContainerId();
+
 
         TaskStatusDTO statusTracker = new TaskStatusDTO(
                 taskId, runtimeId, "PENDING", Instant.now(), "Waiting for memory admission..."
@@ -75,7 +78,7 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
             statusTracker.setStatus("COMPUTING");
             statusTracker.setMessage("Computing in container pool...");
 
-            log.info("🧠 [Orch] Task-{} assembled {} input groups. Entering execution pool...", taskId, structuredInputs.size());
+            log.info("[Orch] Task-{} assembled {} input groups. Entering execution pool...", taskId, structuredInputs.size());
 
             // =========================================================================
             // 👇 就是这里！核心替换部分开始 👇
@@ -86,20 +89,21 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
 
             // 确保模型确实返回了数据，没有内部崩溃
             if (structuredResults == null || structuredResults.isEmpty()) {
-                log.warn("⚠️ [Orch] Task-{} execution returned NULL or EMPTY results! Model failed internally.", taskId);
+                log.warn("[Orch] Task-{} execution returned NULL or EMPTY results! Model failed internally.", taskId);
             } else {
+
                 // 2. 像素级过滤（根据 TSState 掩码，把大盘里已有的数据剔除）
                 List<List<TSDataBlock>> finalFilteredResults = task.filterRedundantOutputs(structuredResults);
 
                 // 3. 检查过滤后是否还有“有效产出”
                 if (finalFilteredResults.isEmpty()) {
                     // 这种情况很正常：说明这批数据和历史观测数据100%重合，不需要这批仿真数据了
-                    log.info("💤 [Orch] Task-{} results are redundant. All pixels already exist in global state.", taskId);
+                    log.info("[Orch] Task-{} results are redundant. All pixels already exist in global state.", taskId);
                 } else {
                     // 只有真有新数据，才推给存储端
-                    log.info("📦 [Orch] Task-{} filtered. Pushing {} remaining valid ports.", taskId, finalFilteredResults.size());
+                    log.info("[Orch] Task-{} filtered. Pushing {} remaining valid ports.", taskId, finalFilteredResults.size());
                     handleResults(task, finalFilteredResults);
-                    log.info("✅ [Orch] Task-{} results successfully pushed to data subsystem.", taskId);
+                    log.info("[Orch] Task-{} results successfully pushed to data subsystem.", taskId);
                 }
             }
             // =========================================================================
@@ -109,7 +113,7 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
             activeTasksMap.remove(taskId);
 
         } catch (Exception e) {
-            log.error("❌ [Orch] Task-{} execution failed: {}", taskId, e.getMessage());
+            log.error("[Orch] Task-{} execution failed: {}", taskId, e.getMessage());
             statusTracker.setStatus("ERROR");
             statusTracker.setMessage("Execution failed: " + e.getMessage());
         } finally {
@@ -186,4 +190,5 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
         }
         return inputGroups;
     }
+
 }

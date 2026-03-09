@@ -78,43 +78,8 @@ public class ModelContainerPool {
         }
 
         if (admissionGranted) {
-            // 🔥🔥🔥 核心修改区：无需修改 ModelContainer 接口，直接从 Parameter 推导 🔥🔥🔥
-            Duration derivedStep = Duration.ofHours(1);   // 默认值
-            Duration derivedWindow = Duration.ofHours(1); // 默认值
-
-            List<Parameter> params = container.getParameterList();
-            if (params != null) {
-                for (Parameter p : params) {
-                    if (p.getAxisList() != null) {
-                        for (Axis axis : p.getAxisList()) {
-                            // 只要发现 TimeAxis，就提取信息 (通常模型的输入输出时间分辨率是一致的)
-                            if (axis instanceof TimeAxis) {
-                                // 假设 Axis 中的 resolution 单位是 "秒" (Double)
-                                long resSeconds = Math.round(axis.getResolution());
-                                long count = axis.getCount();
-
-                                if (resSeconds > 0) {
-                                    derivedStep = Duration.ofSeconds(resSeconds);
-                                    // 窗口 = 步长 * 点数 (即总的时间跨度)
-                                    derivedWindow = Duration.ofSeconds(resSeconds * count);
-                                }
-                                break; // 找到一个有效的时间轴即可跳出
-                            }
-                        }
-                    }
-                    // 如果已经从默认值变更了，说明找到了，不再遍历后续参数
-                    if (!derivedStep.equals(Duration.ofHours(1))) break;
-                }
-            }
-
-            // 注册到触发器
-            eventTrigger.registerModel(
-                    runtimeId,
-                    params,
-                    derivedStep,   // 自动推导的步长
-                    derivedWindow  // 自动推导的窗口
-            );
-
+            // 🎯 新架构：直接把参数图纸丢给触发器，时间步长由触发器内部进行沙盘推演！
+            eventTrigger.registerModel(runtimeId, container.getParameterList());
         } else {
             container.unload();
         }
