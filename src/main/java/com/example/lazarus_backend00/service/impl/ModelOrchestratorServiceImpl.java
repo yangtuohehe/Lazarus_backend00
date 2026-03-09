@@ -1,5 +1,6 @@
 package com.example.lazarus_backend00.service.impl;
 
+import com.example.lazarus_backend00.component.orchestration.DataStateUpdateEvent;
 import com.example.lazarus_backend00.component.orchestration.ExecutableTask;
 import com.example.lazarus_backend00.component.pool.ModelContainerPool;
 import com.example.lazarus_backend00.domain.data.TSDataBlock;
@@ -12,6 +13,7 @@ import com.example.lazarus_backend00.service.DataService;
 import com.example.lazarus_backend00.service.ModelOrchestratorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -33,17 +35,19 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
     private final DataService dataService;
     private final ModelContainerPool containerPool;
     private final Object dataMemoryLock = new Object();
-
+    private final ApplicationEventPublisher eventPublisher;
     private final Map<Long, TaskStatusDTO> activeTasksMap = new ConcurrentHashMap<>();
 
     public ModelOrchestratorServiceImpl(DataPreloadService dataPreloadService,
                                         DataService dataService,
                                         @Lazy ModelContainerPool containerPool,
-                                        ModelPoolConfig poolConfig) {
+                                        ModelPoolConfig poolConfig,
+                                        ApplicationEventPublisher eventPublisher) {
         this.dataPreloadService = dataPreloadService;
         this.dataService = dataService;
         this.containerPool = containerPool;
         this.poolConfig = poolConfig;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -56,25 +60,24 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
         // =========================================================================
         // 🎯 新增日志：打印任务的实际输入和预期输出时间段 (清爽聚合版)
         // =========================================================================
-        StringBuilder timeLog = new StringBuilder("\n=== Task-" + taskId + " Time Ranges ===\n▶️ Inputs:\n");
+        StringBuilder timeLog = new StringBuilder("\n=== Task-" + taskId + " [模型/容器ID: " + runtimeId + "] Time Ranges ===\n▶️ Inputs:\n");
         for (ExecutableTask.TaskPort port : task.getInputs()) {
             if (!port.getAtomicShells().isEmpty()) {
                 timeLog.append("   - Port ").append(port.getOrder()).append(": ")
                         .append(formatTimeRange(port.getAtomicShells().get(0))).append("\n");
             }
         }
+
         timeLog.append("▶️ Expected Outputs:\n");
         for (ExecutableTask.TaskPort port : task.getOutputs()) {
             for (List<TSState> featureStates : port.getTargetStatesPerFeature()) {
                 if (!featureStates.isEmpty()) {
+                    // 🎯 修复：只需要取第一个 State！
+                    // 因为 formatTimeRange 内部已经利用 TimeAxis.count 加上了这 12 个小时的总跨度。
                     TSState firstState = featureStates.get(0);
-                    TSState lastState = featureStates.get(featureStates.size() - 1);
 
-                    String startTime = formatTimeRange(firstState).split(" to ")[0].replace("[", "");
-                    String endTime = formatTimeRange(lastState).split(" to ")[1].replace("]", "");
-
-                    timeLog.append("   - Feature ").append(firstState.getFeatureId()).append(": [")
-                            .append(startTime).append(" to ").append(endTime).append("]\n");
+                    timeLog.append("   - Feature ").append(firstState.getFeatureId()).append(": ")
+                            .append(formatTimeRange(firstState)).append("\n");
                 }
             }
         }
@@ -158,6 +161,22 @@ public class ModelOrchestratorServiceImpl implements ModelOrchestratorService {
                     log.info("[Orch] Task-{} filtered. Pushing {} remaining valid ports.", taskId, finalFilteredResults.size());
                     handleResults(task, finalFilteredResults);
                     log.info("[Orch] Task-{} results successfully pushed to data subsystem.", taskId);
+                    // ================= ✅ 新增：任务成功落地后的真实广播 =================
+                    List<TSState> generatedStates = new ArrayList<>();
+                    for (ExecutableTask.TaskPort port : task.getOutputs()) {
+                        for (List<TSState> featureStates : port.getTargetStatesPerFeature()) {
+                            for (TSState stateTemplate : featureStates) {
+                                TSState readyState = new TSState(stateTemplate);
+                                readyState.getMissingHolesMask().clear(); // 清除空洞
+                                readyState.getReadyMask().set(0, readyState.getWidth() * readyState.getHeight()); // 宣告真实存在
+                                generatedStates.add(readyState);
+                            }
+                        }
+                    }
+                    if (!generatedStates.isEmpty()) {
+                        eventPublisher.publishEvent(new DataStateUpdateEvent(this, generatedStates, false));
+                    }
+                    // ==================================================================
                 }
             }
 

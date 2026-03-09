@@ -44,7 +44,7 @@ public class DataStorageServiceImpl implements DataStorageService {
     }
 
     // =================================================================
-    // 1. 状态检查 (保持不变)
+    // 1. Status Check (Unchanged)
     // =================================================================
     @Override
     public List<DataCheckResult> checkDataStatus(List<TSShell> shells) {
@@ -74,8 +74,8 @@ public class DataStorageServiceImpl implements DataStorageService {
         return results;
     }
 
-// =================================================================
-    // 2. 批量与单点数据读取 (严格模式：找不到文件直接抛异常)
+    // =================================================================
+    // 2. Batch and Single Data Block Fetching (Strict mode: throw exception if file not found)
     // =================================================================
     @Override
     public List<TSDataBlock> fetchDataBlocks(List<TSShell> shells) {
@@ -95,7 +95,7 @@ public class DataStorageServiceImpl implements DataStorageService {
 
                 float[] flattenedData = new float[totalSize];
 
-                // 🗑️ 删除了之前那句掩耳盗铃的 Arrays.fill(flattenedData, Float.NaN);
+                // 🗑️ Removed the previous self-deceiving Arrays.fill(flattenedData, Float.NaN);
 
                 for (int t = 0; t < tCount; t++) {
                     Instant currentTime = timePoints.get(t);
@@ -114,8 +114,8 @@ public class DataStorageServiceImpl implements DataStorageService {
                     if (targetPath != null) {
                         readGeoTiffIntoArray(targetPath.toFile(), flattenedData, t * frameSize, frameSize);
                     } else {
-                        // 🚨 核心修改：如果既没有实测文件，也没有仿真文件，绝对不塞 NaN，直接抛出致命异常！
-                        String errorMsg = String.format("严重错误：底层数据缺失！无法找到特征 [%s] 在时刻 [%s] 的实测或仿真文件！",
+                        // 🚨 Core modification: If neither observed nor simulated files exist, absolutely do not fill with NaN. Throw a fatal exception instead!
+                        String errorMsg = String.format("Fatal Error: Underlying data missing! Cannot find observed or simulated file for feature [%s] at time [%s]!",
                                 folderName, currentTime.toString());
                         System.err.println(errorMsg);
                         throw new IllegalStateException(errorMsg);
@@ -133,7 +133,7 @@ public class DataStorageServiceImpl implements DataStorageService {
                 results.add(block);
 
             } catch (Exception e) {
-                // 🚨 核心修改：不再只打印 e.printStackTrace() 后默默继续，而是向上层抛出异常中断执行！
+                // 🚨 Core modification: No longer silently continuing after printing e.printStackTrace(), but throwing the exception to the upper layer to interrupt execution!
                 throw new RuntimeException("Data subsystem fetch failed: " + e.getMessage(), e);
             }
         }
@@ -147,7 +147,7 @@ public class DataStorageServiceImpl implements DataStorageService {
     }
 
     // =================================================================
-    // 3. 模型仿真结果入库 (强制 -ls 后缀 + NaN 拦截防毒机制)
+    // 3. Ingest Model Simulation Results (Forced -ls suffix + NaN intercept anti-poison mechanism)
     // =================================================================
     @Override
     public void ingestCalculatedData(TSDataBlock block) {
@@ -182,37 +182,38 @@ public class DataStorageServiceImpl implements DataStorageService {
                 int srcPos = t * frameSize;
 
                 if (srcPos + frameSize > allData.length) {
-                    System.err.println("数据长度不足，跳过第 " + t + " 帧");
+                    System.err.println("Data length insufficient, skipping frame " + t);
                     continue;
                 }
                 System.arraycopy(allData, srcPos, frameData, 0, frameSize);
 
                 // =======================================================
-                // 🛑 核心防线：检查这帧数据是不是全被掩膜置为了 NaN
+                // 🛑 Core defense line: Check if this frame of data is completely masked with NaN
                 // =======================================================
                 boolean hasValidPixel = false;
                 for (float v : frameData) {
                     if (!Float.isNaN(v)) {
                         hasValidPixel = true;
-                        break; // 只要发现一颗有效的像素，就判定这帧有效
+                        break; // As long as one valid pixel is found, this frame is considered valid
                     }
                 }
 
-                // 如果这帧 100% 都是 NaN (完全被掩膜丢弃的垃圾数据)，绝不写入磁盘！
+                // If this frame is 100% NaN (garbage data completely discarded by the mask), never write it to disk!
                 if (!hasValidPixel) {
-                    System.out.println("   ⏭️ [DataStorage] 拦截废弃帧！时刻 " + currentTime + " 被掩膜标记为全 NaN，拒绝写入磁盘以免污染下一轮输入！");
-                    continue; // 💥 直接跳过，跳到下一帧！
+                    System.out.println("   ⏭️ [DataStorage] Intercepted discarded frame! Time " + currentTime + " is masked as all NaN, refusing to write to disk to avoid polluting the next round of input!");
+                    continue; // 💥 Skip directly to the next frame!
                 }
                 // =======================================================
 
                 writeGeoTiff(outputFile, frameData, width, height, envelope);
-                System.out.println("   💾 [Calculated] 已保存有效仿真数据: " + outputFile.getName());
+                System.out.println("   💾 [Calculated] Saved valid simulation data: " + outputFile.getName());
             }
         } catch (Exception e) {
-            throw new RuntimeException("仿真数据入库失败: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to ingest simulation data: " + e.getMessage(), e);
         }
     }
-    // ================== 辅助工具方法 (保持不变) ==================
+
+    // ================== Auxiliary Tool Methods (Unchanged) ==================
     private String generateFileName(String folderName, FeatureMetadataManager.NamingStrategy strategy, Instant time, String suffix) {
         String baseName = (strategy == FeatureMetadataManager.NamingStrategy.DAILY_SHORT)
                 ? FMT_DAILY.format(time) : FMT_HOURLY.format(time);
@@ -224,11 +225,11 @@ public class DataStorageServiceImpl implements DataStorageService {
         if (shell.hasTime() && shell.getTAxis().getCount() != null) {
             Instant base = shell.getTOrigin();
 
-            // 🎯 核心修复：调用你下面已经写好的单位转换方法！1小时会被正确转换为 3600秒
+            // 🎯 Core fix: Call the unit conversion method already written below! 1 hour will be correctly converted to 3600 seconds
             long stepSeconds = getAxisResolutionInSeconds(shell.getTAxis());
 
             for (int i = 0; i < shell.getTAxis().getCount(); i++) {
-                points.add(base.plusSeconds(i * stepSeconds)); // 👈 这样加的才是 3600秒，7200秒...
+                points.add(base.plusSeconds(i * stepSeconds)); // 👈 This way it correctly adds 3600s, 7200s...
             }
         } else if (shell.getTOrigin() != null) {
             points.add(shell.getTOrigin());
@@ -241,11 +242,11 @@ public class DataStorageServiceImpl implements DataStorageService {
         if (block.getTAxis() != null && block.getTAxis().getCount() != null) {
             Instant base = block.getTOrigin();
 
-            // 🎯 核心修复：将带有单位的分辨率，转换为真实的秒数跨度
+            // 🎯 Core fix: Convert the resolution with units into a true span of seconds
             long stepSeconds = getAxisResolutionInSeconds(block.getTAxis());
 
             for (int i = 0; i < block.getTAxis().getCount(); i++) {
-                // 用转换后的秒数进行推演
+                // Deduce using the converted seconds
                 points.add(base.plusSeconds(i * stepSeconds));
             }
         } else {
@@ -253,21 +254,22 @@ public class DataStorageServiceImpl implements DataStorageService {
         }
         return points;
     }
+
     /**
-     * 将时间轴的单位统一转换为秒，用于子系统切片写文件
+     * Uniformly convert the unit of the time axis to seconds, used for subsystem slicing and writing files
      */
     private long getAxisResolutionInSeconds(com.example.lazarus_backend00.domain.axis.TimeAxis tAxis) {
         if (tAxis == null || tAxis.getResolution() == null) return 0;
         double res = tAxis.getResolution();
         String unit = (tAxis.getUnit() != null) ? tAxis.getUnit().trim().toLowerCase() : "";
 
-        // 🎯 强校验与硬编码：只要看到 h 开头，或者单位为空，统统按小时 (3600秒) 算！
+        // 🎯 Strong validation and hardcoding: As long as it starts with 'h', or the unit is empty, always calculate as hours (3600 seconds)!
         if (unit.startsWith("h") || unit.isEmpty()) {
             return (long) (res * 3600);
         } else if (unit.startsWith("m")) {
             return (long) (res * 60);
         }
-        // 如果明确传了 Seconds，才按秒算
+        // Only calculate as seconds if 'Seconds' is explicitly passed
         return (long) res;
     }
 
@@ -290,7 +292,7 @@ public class DataStorageServiceImpl implements DataStorageService {
                 target[offset + i] = dataBuffer.getElemFloat(i);
             }
         } catch (Exception e) {
-            System.err.println("❌ [GeoTiff] 读取异常 [" + file.getName() + "]: " + e.getMessage());
+            System.err.println("❌ [GeoTiff] Read exception [" + file.getName() + "]: " + e.getMessage());
         } finally {
             if (coverage != null) try { coverage.dispose(true); } catch (Exception ignored) {}
             if (reader != null) try { reader.dispose(); } catch (Exception ignored) {}

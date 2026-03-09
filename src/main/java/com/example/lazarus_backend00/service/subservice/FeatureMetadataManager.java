@@ -25,6 +25,7 @@ public class FeatureMetadataManager {
         register(2, "temp");
         register(3, "precip");
         register(4, "evap");
+        register(5, "salinity05");
         // ... 其他 Meiji
     }
 

@@ -26,7 +26,7 @@ public class OnnxDirectProbeTest {
 
     @Test
     public void probeModelId2Output() {
-        int targetModelId = 2;
+        int targetModelId = 3;
         System.out.println("\n🚀 ========================================================");
         System.out.println("🚀 开始直接内存探测模型 ID: " + targetModelId);
         System.out.println("🚀 ========================================================\n");

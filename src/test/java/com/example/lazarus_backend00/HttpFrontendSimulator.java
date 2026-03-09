@@ -21,61 +21,68 @@ public class HttpFrontendSimulator {
 
         System.out.println("🚀 启动模拟前端客户端...");
 
+        // 🎯 定义需要自动加载和注册的模型 ID 列表
+        int[] modelIdsToRegister = {2,3};
+
         // 1. 初始化注册模型
-        try {
-            System.out.println("📦 正在尝试加载模型 (id=2)...");
-            restTemplate.postForEntity(baseUrl + "/api/container/register?modelId=2", null, String.class);
-            System.out.println("✅ 模型加载命令已发送。");
-        } catch (Exception e) {
-            System.err.println("⚠️ 模型加载可能已存在或出现异常: " + e.getMessage());
+        for (int modelId : modelIdsToRegister) {
+            try {
+                System.out.println("📦 正在尝试加载模型 (id=" + modelId + ")...");
+                restTemplate.postForEntity(baseUrl + "/api/container/register?modelId=" + modelId, null, String.class);
+                System.out.println("✅ 模型(id=" + modelId + ")加载命令已发送。");
+            } catch (Exception e) {
+                System.err.println("⚠️ 模型(id=" + modelId + ")加载可能已存在或出现异常: " + e.getMessage());
+            }
         }
 
         // 2. 获取模型详细信息，以便提取 tif -> tsdatablock 所需的地理参数
-        System.out.println("\n🔍 正在获取模型(id=2)参数信息...");
-        try {
-            // 注意：这里假设您有一个可以根据 modelId 查询模型详细信息的接口。
-            // 例如：/api/model/detail?modelId=2 或者是之前注册时返回的结构
-            // 如果您没有专门的查询接口，您可以尝试调用 /model/structure 获取标准结构（此处以结构为例演示解析过程，实际应查询具体模型）
+        for (int modelId : modelIdsToRegister) {
+            System.out.println("\n🔍 正在获取模型(id=" + modelId + ")参数信息...");
+            try {
+                // 注意：这里假设您有一个可以根据 modelId 查询模型详细信息的接口。
+                // 例如：/api/model/detail?modelId=2 或者是之前注册时返回的结构
+                // 如果您没有专门的查询接口，您可以尝试调用 /model/structure 获取标准结构（此处以结构为例演示解析过程，实际应查询具体模型）
 
-            // 为了演示，我们先尝试获取之前您写的结构接口的内容
-            ResponseEntity<JsonNode> modelDetailRes = restTemplate.getForEntity(baseUrl + "/model/structure", JsonNode.class);
+                // TODO: 建议后续如果后端有真实的查询接口，请替换为 baseUrl + "/api/model/detail?modelId=" + modelId
+                ResponseEntity<JsonNode> modelDetailRes = restTemplate.getForEntity(baseUrl + "/model/structure", JsonNode.class);
 
-            if (modelDetailRes.getStatusCode().is2xxSuccessful() && modelDetailRes.getBody() != null) {
-                JsonNode modelInfo = modelDetailRes.getBody();
+                if (modelDetailRes.getStatusCode().is2xxSuccessful() && modelDetailRes.getBody() != null) {
+                    JsonNode modelInfo = modelDetailRes.getBody();
 
-                System.out.println("\n📊 ================= 提取到的模型地理参数 ================= 📊");
+                    System.out.println("\n📊 ================= 提取到的模型(id=" + modelId + ")地理参数 ================= 📊");
 
-                // 导航到 parameters 节点
-                JsonNode parameters = modelInfo.path("modelInterface").path("parameters");
-                if (parameters.isArray() && parameters.size() > 0) {
-                    JsonNode param = parameters.get(0); // 取第一个参数作为示例
+                    // 导航到 parameters 节点
+                    JsonNode parameters = modelInfo.path("modelInterface").path("parameters");
+                    if (parameters.isArray() && parameters.size() > 0) {
+                        JsonNode param = parameters.get(0); // 取第一个参数作为示例
 
-                    // 提取原点信息
-                    double originLon = param.path("originPointLon").asDouble();
-                    double originLat = param.path("originPointLat").asDouble();
-                    System.out.printf("📍 原点坐标: Longitude = %.6f, Latitude = %.6f\n", originLon, originLat);
+                        // 提取原点信息
+                        double originLon = param.path("originPointLon").asDouble();
+                        double originLat = param.path("originPointLat").asDouble();
+                        System.out.printf("📍 原点坐标: Longitude = %.6f, Latitude = %.6f\n", originLon, originLat);
 
-                    // 提取轴信息 (分辨率、数量等)
-                    JsonNode axes = param.path("axis");
-                    if (axes.isArray()) {
-                        for (JsonNode axis : axes) {
-                            String type = axis.path("type").asText();
-                            if ("SPACE_X".equals(type) || "SPACE_Y".equals(type)) {
-                                double resolution = axis.path("resolution").asDouble();
-                                int count = axis.path("count").asInt();
-                                String unit = axis.path("unit").asText();
-                                System.out.printf("📏 %s 轴: 分辨率 = %.6f %s, 节点数 = %d\n", type, resolution, unit, count);
+                        // 提取轴信息 (分辨率、数量等)
+                        JsonNode axes = param.path("axis");
+                        if (axes.isArray()) {
+                            for (JsonNode axis : axes) {
+                                String type = axis.path("type").asText();
+                                if ("SPACE_X".equals(type) || "SPACE_Y".equals(type)) {
+                                    double resolution = axis.path("resolution").asDouble();
+                                    int count = axis.path("count").asInt();
+                                    String unit = axis.path("unit").asText();
+                                    System.out.printf("📏 %s 轴: 分辨率 = %.6f %s, 节点数 = %d\n", type, resolution, unit, count);
+                                }
                             }
                         }
+                        System.out.println("⚠️ 请将上述地理参数原封不动地手动填入或传递给您的 tif->tsdatablock 转换函数中。");
+                    } else {
+                        System.out.println("❌ 未在模型信息中找到参数(parameters)节点。");
                     }
-                    System.out.println("⚠️ 请将上述地理参数原封不动地手动填入或传递给您的 tif->tsdatablock 转换函数中。");
-                } else {
-                    System.out.println("❌ 未在模型信息中找到参数(parameters)节点。");
+                    System.out.println("==========================================================\n");
                 }
-                System.out.println("==========================================================\n");
+            } catch (Exception e) {
+                System.err.println("❌ 获取模型(id=" + modelId + ")参数失败，请确保查询接口可用: " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("❌ 获取模型参数失败，请确保查询接口可用: " + e.getMessage());
         }
 
 

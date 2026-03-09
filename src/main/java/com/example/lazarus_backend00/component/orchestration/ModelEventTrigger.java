@@ -1,10 +1,418 @@
+//
+//package com.example.lazarus_backend00.component.orchestration;
+//
+//import com.example.lazarus_backend00.component.clock.VirtualTimeTickEvent;
+//import com.example.lazarus_backend00.component.container.Parameter;
+//import com.example.lazarus_backend00.domain.axis.Axis;
+//import com.example.lazarus_backend00.domain.axis.Feature;
+//import com.example.lazarus_backend00.domain.axis.TimeAxis;
+//import com.example.lazarus_backend00.domain.data.TSState;
+//import com.example.lazarus_backend00.domain.data.TSShell;
+//import com.example.lazarus_backend00.domain.data.TSShellFactory;
+//import com.example.lazarus_backend00.service.ModelOrchestratorService;
+//import lombok.extern.slf4j.Slf4j;
+//import org.springframework.context.event.EventListener;
+//
+//import java.time.Instant;
+//import java.util.*;
+//import java.util.concurrent.ConcurrentHashMap;
+//import java.util.concurrent.atomic.AtomicLong;
+//
+//@Slf4j
+//public class ModelEventTrigger {
+//
+//    private final ModelOrchestratorService orchestratorService;
+//    private final AtomicLong taskIdGenerator = new AtomicLong(1000);
+//
+//    /** 注册表 */
+//    private final Map<Integer, ModelTriggerContext> registry = new ConcurrentHashMap<>();
+//
+//    /** 依赖图路由：仅用于当外部数据到达时，知道该把数据派发给哪些模型的自治列表 */
+//    private final Map<Integer, List<ModelTriggerContext>> featureRouterMap = new ConcurrentHashMap<>();
+//
+//    private Instant currentPhysicalTime;
+//
+//    public ModelEventTrigger(ModelOrchestratorService orchestratorService, Instant startTime) {
+//        this.orchestratorService = orchestratorService;
+//        this.currentPhysicalTime = startTime;
+//    }
+//
+//    public void registerModel(int runtimeId, List<Parameter> params) {
+//        ModelTriggerContext ctx = new ModelTriggerContext(runtimeId, params);
+//        registry.put(runtimeId, ctx);
+//
+//        for (Parameter p : params) {
+//            for (Feature f : p.getFeatureList()) {
+//                featureRouterMap.computeIfAbsent(f.getId(), k -> new ArrayList<>()).add(ctx);
+//            }
+//        }
+//    }
+//
+//    @EventListener
+//    public void onVirtualTimeTick(VirtualTimeTickEvent event) {
+//        this.currentPhysicalTime = event.getVirtualTime();
+//        scanAndDispatch();
+//
+//        // 👉 上帝视角状态大盘日志
+//        printGlobalTimelineDashboard();
+//    }
+//
+//    @EventListener
+//    public void onDataStateUpdate(DataStateUpdateEvent event) {
+//        // 数据路由：收到外部数据，分发给所有关心它的模型沙盘
+//        for (TSState incoming : event.getTsStates()) {
+//            List<ModelTriggerContext> contexts = featureRouterMap.getOrDefault(incoming.getFeatureId(), Collections.emptyList());
+//            for (ModelTriggerContext ctx : contexts) {
+//                ctx.updateLocalState(incoming);
+//            }
+//        }
+//        scanAndDispatch();
+//
+//        // 👉 上帝视角状态大盘日志
+//        printGlobalTimelineDashboard();
+//    }
+//
+//    // ===================================================================================
+//    // 算法核心：以每个模型为自治单元，纯状态驱动推演 (无强制跳跃)
+//    // ===================================================================================
+//    private void scanAndDispatch() {
+//        for (ModelTriggerContext ctx : registry.values()) {
+//
+//            long baseStepSec = calculateBaseStepSeconds(ctx.getOutputParams());
+//
+//            // 回溯100小时进行对齐遍历
+//            long startSec = currentPhysicalTime.getEpochSecond() - (100 * 3600);
+//            startSec = startSec - (startSec % baseStepSec);
+//            Instant modelTime = Instant.ofEpochSecond(startSec);
+//
+//            // 1. 预先确保沙盘里存在 0 (WAITING) 的空洞占位
+//            ensureZerosExistInContext(ctx, modelTime, currentPhysicalTime);
+//
+//            // 2. 一个时间步一个时间步地纯步进遍历（完全由状态拦截，无需大跳）
+//            while (!modelTime.isAfter(currentPhysicalTime)) {
+//
+//                int inputStatus = checkInputsStatus(ctx, modelTime);
+//
+////                // ----------------------------------------------------------------
+////                // 第二路：发现实测替换态 (2) -> 只要作为输入，强制重算！
+////                // ----------------------------------------------------------------
+////                if (inputStatus == 2) {
+////                    buildAndSubmitTask(ctx, modelTime, false);
+////
+////                    // 🎯 核心修复：只清空当前发车帧的实测标记，绝对不碰后面的实测数据 (解决3变2问题)
+////                    changeInputStates2To1ForCurrentCursorOnly(ctx, modelTime);
+////                    // 🎯 提前占位：在本地沙盘里把未来输出设为1，防止下一步循环重复发车
+////                    //changeOutputStates0To1(ctx, modelTime);
+////                }
+////                // ----------------------------------------------------------------
+////                // 第一路：发现数据齐全 (1) 且输出首帧为空态 (0) -> 补漏计算！
+////                // ----------------------------------------------------------------
+////                else if (inputStatus == 1 && hasAnyOutputHole(ctx, modelTime)) {
+////                    buildAndSubmitTask(ctx, modelTime, true);
+////
+////                    // 🎯 提前占位：在本地沙盘里把未来输出设为1，防止下一步循环重复发车
+////                    //changeOutputStates0To1(ctx, modelTime);
+////                }
+//// ----------------------------------------------------------------
+//                // 第二路：发现实测替换态 (2) -> 只要作为输入，强制重算！
+//                // ----------------------------------------------------------------
+//                if (inputStatus == 2) {
+//                    buildAndSubmitTask(ctx, modelTime, false);
+//                    changeInputStates2To1ForCurrentCursorOnly(ctx, modelTime);
+//
+//                    // ❌ 删除：changeOutputStates0To1(ctx, modelTime);
+//                    break; // ✅ 新增：发车后立刻刹车，等待真实任务完成后的广播唤醒！
+//                }
+//                // ----------------------------------------------------------------
+//                // 第一路：发现数据齐全 (1) 且输出首帧为空态 (0) -> 补漏计算！
+//                // ----------------------------------------------------------------
+//                else if (inputStatus == 1 && hasAnyOutputHole(ctx, modelTime)) {
+//                    buildAndSubmitTask(ctx, modelTime, true);
+//
+//                    // ❌ 删除：changeOutputStates0To1(ctx, modelTime);
+//                    break; // ✅ 新增：发车后立刻刹车，等待真实任务完成后的广播唤醒！
+//                }
+//                // 常规步进：永远只走基础步长，靠上述逻辑自然拦截重叠
+//                modelTime = modelTime.plusSeconds(baseStepSec);
+//            }
+//        }
+//    }
+//
+//    private int checkInputsStatus(ModelTriggerContext ctx, Instant modelTime) {
+//        boolean hasState2 = false;
+//
+//        for (Parameter p : ctx.getInputParams()) {
+//            TimeAxis tAxis = p.getTimeAxis();
+//            if (tAxis == null) continue;
+//            long resSec = getAxisResolutionInSeconds(tAxis);
+//
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+//
+//            for (Feature f : p.getFeatureList()) {
+//                for (int i = 0; i < tAxis.getCount(); i++) {
+//                    Instant reqT = actualStartTime.plusSeconds(i * resSec);
+//                    TSState state = ctx.getLocalState(f.getId(), reqT);
+//
+//                    if (state == null || state.hasHoles()) return 0;
+//                    if (state.hasReplacedData()) hasState2 = true;
+//                }
+//            }
+//        }
+//        return hasState2 ? 2 : 1;
+//    }
+//    /**
+//     * 🎯 严格分块防线：只检查这一趟输出的【第一帧】！
+//     * 只要第一帧有数据，说明整个块已经被上一个任务覆盖过了，游标静默滑过，直到遇到下一个真实的空洞起点！
+//     */
+//    private boolean isFirstOutputMomentAHole(ModelTriggerContext ctx, Instant modelTime) {
+//        for (Parameter p : ctx.getOutputParams()) {
+//            TimeAxis tAxis = p.getTimeAxis();
+//            if (tAxis == null) continue;
+//
+//            long resSec = getAxisResolutionInSeconds(tAxis);
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//            Instant firstOutT = modelTime.plusSeconds(offset * resSec);
+//
+//            for (Feature f : p.getFeatureList()) {
+//                TSState state = ctx.getLocalState(f.getId(), firstOutT);
+//                if (state == null || state.hasHoles()) return true;
+//            }
+//        }
+//        return false;
+//    }
+//    /**
+//     * 🎯 终极防线：只要这趟发车的输出窗口里，包含任何一个空洞，就说明它能推进边界，必须发车！
+//     * （多余的重叠帧会被底层存储的掩膜拦截，绝对安全）
+//     */
+//    private boolean hasAnyOutputHole(ModelTriggerContext ctx, Instant modelTime) {
+//        for (Parameter p : ctx.getOutputParams()) {
+//            TimeAxis tAxis = p.getTimeAxis();
+//            if (tAxis == null) continue;
+//
+//            long resSec = getAxisResolutionInSeconds(tAxis);
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+//
+//            for (Feature f : p.getFeatureList()) {
+//                for (int i = 0; i < tAxis.getCount(); i++) {
+//                    Instant outT = actualStartTime.plusSeconds(i * resSec);
+//                    TSState state = ctx.getLocalState(f.getId(), outT);
+//                    // 只要发现输出序列里有任何一帧是空的，立刻返回 true 触发任务
+//                    if (state == null || state.hasHoles()) return true;
+//                }
+//            }
+//        }
+//        return false;
+//    }
+//    /**
+//     * 🎯 精准清除法：只清除游标所在的第一帧，绝不能用循环去清除整个窗口
+//     */
+//    private void changeInputStates2To1ForCurrentCursorOnly(ModelTriggerContext ctx, Instant modelTime) {
+//        for (Parameter p : ctx.getInputParams()) {
+//            TimeAxis tAxis = p.getTimeAxis();
+//            if (tAxis == null) continue;
+//            long resSec = getAxisResolutionInSeconds(tAxis);
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//
+//            // 精确算出游标对应起点的这一帧时间
+//            Instant firstReqT = modelTime.plusSeconds(offset * resSec);
+//
+//            for (Feature f : p.getFeatureList()) {
+//                TSState state = ctx.getLocalState(f.getId(), firstReqT);
+//                if (state != null && state.hasReplacedData()) {
+//                    state.getReplacedMask().clear();
+//                    state.getReadyMask().set(0, calculateFrameSize(p));
+//                }
+//            }
+//        }
+//    }
+////    private void changeOutputStates0To1(ModelTriggerContext ctx, Instant modelTime) {
+////        for (Parameter p : ctx.getOutputParams()) {
+////            TimeAxis tAxis = p.getTimeAxis();
+////            if (tAxis == null) continue;
+////            long resSec = getAxisResolutionInSeconds(tAxis);
+////            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+////            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+////
+////            for (Feature f : p.getFeatureList()) {
+////                for (int i = 0; i < tAxis.getCount(); i++) {
+////                    Instant outT = actualStartTime.plusSeconds(i * resSec);
+////
+////                    // 🎯 核心修复：强制在沙盘中为未来的预测时刻开辟坑位！
+////                    // 只有确保坑位存在，我们才能把它标记为“提前占位(1)”
+////                    ctx.ensureStateExists(f.getId(), outT, p);
+////
+////                    TSState state = ctx.getLocalState(f.getId(), outT);
+////                    if (state != null) {
+////                        state.getReadyMask().set(0, calculateFrameSize(p));
+////                    }
+////                }
+////            }
+////        }
+////    }
+//
+//
+//    private void buildAndSubmitTask(ModelTriggerContext ctx, Instant modelTime, boolean applyMask) {
+//        List<ExecutableTask.TaskPort> inputPorts = new ArrayList<>();
+//        for (Parameter p : ctx.getInputParams()) {
+//            long resSec = getAxisResolutionInSeconds(p.getTimeAxis());
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+//
+//            List<TSShell> shells = new ArrayList<>();
+//            for (Feature f : p.getFeatureList()) {
+//                shells.add(TSShellFactory.createFromParameter(f.getId(), actualStartTime, p));
+//            }
+//            inputPorts.add(new ExecutableTask.TaskPort(p.getTensorOrder(), shells, null));
+//        }
+//
+//        List<ExecutableTask.TaskPort> outputPorts = new ArrayList<>();
+//        for (Parameter p : ctx.getOutputParams()) {
+//            long resSec = getAxisResolutionInSeconds(p.getTimeAxis());
+//            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+//            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+//            int tCount = (p.getTimeAxis() != null && p.getTimeAxis().getCount() != null) ? p.getTimeAxis().getCount() : 1;
+//
+//            List<TSShell> shells = new ArrayList<>();
+//            List<List<TSState>> targetStatesPerFeature = new ArrayList<>();
+//
+//            for (Feature f : p.getFeatureList()) {
+//                shells.add(TSShellFactory.createFromParameter(f.getId(), actualStartTime, p));
+//
+//                List<TSState> statesForThisFeature = new ArrayList<>();
+//                for (int t = 0; t < tCount; t++) {
+//                    Instant currentFrameTime = actualStartTime.plusSeconds(t * resSec);
+//                    TSState currentState = ctx.getLocalState(f.getId(), currentFrameTime);
+//                    statesForThisFeature.add(new TSState(currentState));
+//                }
+//                targetStatesPerFeature.add(statesForThisFeature);
+//            }
+//            outputPorts.add(new ExecutableTask.TaskPort(p.getTensorOrder(), shells, targetStatesPerFeature));
+//        }
+//
+//        long taskId = taskIdGenerator.getAndIncrement();
+//        orchestratorService.dispatchTask(new ExecutableTask(taskId, ctx.getContainerId(), applyMask, inputPorts, outputPorts));
+//    }
+//
+//    private void ensureZerosExistInContext(ModelTriggerContext ctx, Instant start, Instant end) {
+//        for (Parameter p : ctx.getOutputParams()) {
+//            TimeAxis tAxis = p.getTimeAxis();
+//            if(tAxis == null) continue;
+//            long resSec = getAxisResolutionInSeconds(tAxis);
+//            for (Instant t = start; !t.isAfter(end); t = t.plusSeconds(resSec)) {
+//                for (Feature f : p.getFeatureList()) {
+//                    ctx.ensureStateExists(f.getId(), t, p);
+//                }
+//            }
+//        }
+//    }
+//
+//    private long calculateBaseStepSeconds(List<Parameter> params) {
+//        return params.stream()
+//                .mapToLong(p -> getAxisResolutionInSeconds(p.getTimeAxis()))
+//                .filter(res -> res > 0)
+//                .min().orElse(3600);
+//    }
+//
+//    private int calculateFrameSize(Parameter p) {
+//        int w = 1, h = 1;
+//        if (p.getAxisList() != null) {
+//            for (com.example.lazarus_backend00.domain.axis.Axis axis : p.getAxisList()) {
+//                if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisX && axis.getCount() != null) w = axis.getCount();
+//                else if (axis instanceof com.example.lazarus_backend00.domain.axis.SpaceAxisY && axis.getCount() != null) h = axis.getCount();
+//            }
+//        }
+//        return w * h;
+//    }
+//
+//    private long getAxisResolutionInSeconds(TimeAxis tAxis) {
+//        if (tAxis == null || tAxis.getResolution() == null) return 0;
+//        double res = tAxis.getResolution();
+//        String unit = (tAxis.getUnit() != null) ? tAxis.getUnit().trim().toLowerCase() : "s";
+//        return unit.startsWith("h") ? (long)(res * 3600) : (unit.startsWith("m") ? (long)(res * 60) : (long)res);
+//    }
+//
+//    public void unregisterModel(int runtimeId) {
+//        ModelTriggerContext ctx = registry.remove(runtimeId);
+//        if (ctx != null) {
+//            for (Parameter p : ctx.getInputParams()) {
+//                for (Feature f : p.getFeatureList()) {
+//                    List<ModelTriggerContext> list = featureRouterMap.get(f.getId());
+//                    if (list != null) {
+//                        list.removeIf(c -> c.getContainerId() == runtimeId);
+//                        if (list.isEmpty()) featureRouterMap.remove(f.getId());
+//                    }
+//                }
+//            }
+//            for (Parameter p : ctx.getOutputParams()) {
+//                for (Feature f : p.getFeatureList()) {
+//                    List<ModelTriggerContext> list = featureRouterMap.get(f.getId());
+//                    if (list != null) {
+//                        list.removeIf(c -> c.getContainerId() == runtimeId);
+//                        if (list.isEmpty()) featureRouterMap.remove(f.getId());
+//                    }
+//                }
+//            }
+//            log.info("🗑️ [Trigger] Unregistered Model & Cleaned Router. RuntimeID: {}", runtimeId);
+//        } else {
+//            log.warn("⚠️ [Trigger] Model not found when unregistering. RuntimeID: {}", runtimeId);
+//        }
+//    }
+//
+//    // ===================================================================================
+//    // 🌍 [上帝视角] 打印真正的全局时间轴数据状态大盘 (跟随物理时钟推进)
+//    // ===================================================================================
+//    // 🎯 新增 synchronized 关键字，防止多线程异步广播时抢占控制台导致打印顺序错乱
+//    private synchronized void printGlobalTimelineDashboard() {
+//        System.out.println("\n================ 🌍 孪生沙盘：时间轴数据状态大盘 ================");
+//        System.out.println("⏰ 当前数字孪生系统时钟: " + currentPhysicalTime);
+//
+//        Set<Integer> allFeatures = new TreeSet<>(featureRouterMap.keySet());
+//        if (allFeatures.isEmpty()) {
+//            System.out.println("暂无特征注册。");
+//            System.out.println("=================================================================\n");
+//            return;
+//        }
+//
+//        Instant startT = currentPhysicalTime.minusSeconds(48 * 3600);
+//
+//        for (Instant t = startT; !t.isAfter(currentPhysicalTime); t = t.plusSeconds(3600)) {
+//            StringBuilder sb = new StringBuilder();
+//            sb.append(String.format("🗓️ 时刻: %s | ", t.toString()));
+//
+//            for (Integer fId : allFeatures) {
+//                String status = "⚪ WAITING(0) [空缺]";
+//                if (featureRouterMap.get(fId) != null) {
+//                    for (ModelTriggerContext ctx : featureRouterMap.get(fId)) {
+//                        TSState state = ctx.getLocalState(fId, t);
+//                        if (state != null) {
+//                            if (state.hasReplacedData()) {
+//                                status = "🟢 REPLACED(2) [实测]";
+//                                break;
+//                            } else if (!state.hasHoles()) {
+//                                status = "🔵 READY(1) [预测]";
+//                                break;
+//                            }
+//                        }
+//                    }
+//                }
+//                sb.append(String.format("特征%d: %s   ", fId, status));
+//            }
+//            System.out.println(sb.toString());
+//        }
+//        System.out.println("=================================================================\n");
+//    }
+//}
+
+
 package com.example.lazarus_backend00.component.orchestration;
 
 import com.example.lazarus_backend00.component.clock.VirtualTimeTickEvent;
 import com.example.lazarus_backend00.component.container.Parameter;
+import com.example.lazarus_backend00.domain.axis.Axis;
 import com.example.lazarus_backend00.domain.axis.Feature;
 import com.example.lazarus_backend00.domain.axis.TimeAxis;
-import com.example.lazarus_backend00.domain.data.DataState;
 import com.example.lazarus_backend00.domain.data.TSState;
 import com.example.lazarus_backend00.domain.data.TSShell;
 import com.example.lazarus_backend00.domain.data.TSShellFactory;
@@ -36,47 +444,9 @@ public class ModelEventTrigger {
         this.currentPhysicalTime = startTime;
     }
 
-    // 注意：去掉了 Duration 参数
     public void registerModel(int runtimeId, List<Parameter> params) {
-        log.info("============== 🔍 模型实例化参数体检 (RuntimeID: {}) ==============", runtimeId);
-//// 🎯 核心修复：对所有的 Parameter 进行深度克隆，特别是轴对象，防止内存污染
-//        List<Parameter> clonedParams = new ArrayList<>();
-//        for (Parameter p : params) {
-//            Parameter cp = new Parameter(p); // 假设你有拷贝构造，如果没有，请确保轴对象是 new 出来的
-//            if (p.getTimeAxis() != null) {
-//                // 强制新建一个时间轴实例，物理隔离！
-//                TimeAxis originalTa = p.getTimeAxis();
-//                TimeAxis newTa = new TimeAxis(originalTa.getResolution(), originalTa.getUnit(),
-//                        originalTa.getResolution(), originalTa.getUnit());
-//                newTa.setCount(originalTa.getCount());
-//                newTa.setType(originalTa.getType());
-//                cp.setTimeAxis(newTa);
-//            }
-//            clonedParams.add(cp);
-//        }
         ModelTriggerContext ctx = new ModelTriggerContext(runtimeId, params);
         registry.put(runtimeId, ctx);
-
-        // 🎯 打印输入参数
-        log.info("📥 [(INPUT)]：");
-        for (Parameter p : ctx.getInputParams()) {
-            TimeAxis t = p.getTimeAxis();
-            String resStr = (t != null) ? t.getResolution() + " " + t.getUnit() : "No time D";
-            int count = (t != null && t.getCount() != null) ? t.getCount() : 1;
-            log.info("   -> TensorOrder: {} | feature count: {} | time(Count): {} | radition: {}",
-                    p.getTensorOrder(), p.getFeatureList().size(), count, resStr);
-        }
-
-        // 🎯 打印输出参数
-        log.info("📤 [(OUTPUT)]：");
-        for (Parameter p : ctx.getOutputParams()) {
-            TimeAxis t = p.getTimeAxis();
-            String resStr = (t != null) ? t.getResolution() + " " + t.getUnit() : "No time D";
-            int count = (t != null && t.getCount() != null) ? t.getCount() : 1;
-            log.info("   -> TensorOrder: {} | feature count: {} | time(Count): {} | radition: {}",
-                    p.getTensorOrder(), p.getFeatureList().size(), count, resStr);
-        }
-        log.info("====================================================================");
 
         for (Parameter p : params) {
             for (Feature f : p.getFeatureList()) {
@@ -89,7 +459,8 @@ public class ModelEventTrigger {
     public void onVirtualTimeTick(VirtualTimeTickEvent event) {
         this.currentPhysicalTime = event.getVirtualTime();
         scanAndDispatch();
-        // 👉 加入打印
+
+        // 👉 上帝视角状态大盘日志
         printGlobalTimelineDashboard();
     }
 
@@ -103,73 +474,61 @@ public class ModelEventTrigger {
             }
         }
         scanAndDispatch();
-        // 👉 加入打印
+
+        // 👉 上帝视角状态大盘日志
         printGlobalTimelineDashboard();
     }
 
     // ===================================================================================
-    // 算法核心：以每个模型为自治单元，在一个时间步一个时间步地推演 (支持 oTimeStep 偏移)
+    // 算法核心：【回溯算法】从未来向历史倒推，贪婪搜索最优起算点！
     // ===================================================================================
     private void scanAndDispatch() {
         for (ModelTriggerContext ctx : registry.values()) {
 
-            // 计算这个模型的基本推进步长（取输出中最小的分辨率）
             long baseStepSec = calculateBaseStepSeconds(ctx.getOutputParams());
-            // 一次任务最大跨度，用于发现缺失时的跳跃跳过 (Jump)
-            long maxOutputSpanSec = calculateMaxSpanSeconds(ctx.getOutputParams());
+            long currentSec = currentPhysicalTime.getEpochSecond();
 
-            // 回溯100小时进行对齐遍历
-            long startSec = currentPhysicalTime.getEpochSecond() - (100 * 3600);
+            // 1. 设定回溯起点：从未来的 100 小时开始，往回倒推！
+            long startSec = currentSec + (100 * 3600);
             startSec = startSec - (startSec % baseStepSec);
             Instant modelTime = Instant.ofEpochSecond(startSec);
 
-            // 1. 预先确保沙盘里存在 0 (WAITING) 的空洞占位
-            ensureZerosExistInContext(ctx, modelTime, currentPhysicalTime);
+            // 设定回溯终点：过去 100 小时
+            long stopSec = currentSec - (100 * 3600);
+            stopSec = stopSec - (stopSec % baseStepSec);
+            Instant stopTime = Instant.ofEpochSecond(stopSec);
 
-            // 2. 一个时间步一个时间步地遍历
-            while (!modelTime.isAfter(currentPhysicalTime)) {
+            // 预先确保沙盘里存在 0 (WAITING) 的空洞占位 (注意传参顺序：过去 -> 未来)
+            ensureZerosExistInContext(ctx, stopTime, modelTime);
 
-                // 检查当前 modelTime 下，输入数据的状态 (0, 1, 2)
+            // 2. 核心大招：反向遍历！(modelTime 不断减去 baseStepSec)
+            while (!modelTime.isBefore(stopTime)) {
+
                 int inputStatus = checkInputsStatus(ctx, modelTime);
 
                 // ----------------------------------------------------------------
-                // 第二路：发现替换态 (2) -> 只要作为输入，强制全量重算！(忽略输出是否有空洞)
+                // 第二路：发现实测替换态 (2) -> 只要作为输入，强制重算！
                 // ----------------------------------------------------------------
                 if (inputStatus == 2) {
-                    buildAndSubmitTask(ctx, modelTime, false); // applyMask = false，不生成掩膜
-                    changeInputStates2To1(ctx, modelTime);     // 把输入里的 2 清除，防止死循环
-                    changeOutputStates0To1(ctx, modelTime);    // 提前把输出坑位占上
+                    buildAndSubmitTask(ctx, modelTime, false);
+                    changeInputStates2To1ForCurrentCursorOnly(ctx, modelTime);
 
-                    // 🎯 核心逻辑：触发任务后，跳过此次任务的输出时间段！
-                    modelTime = modelTime.plusSeconds(maxOutputSpanSec);
-                    continue;
+                    break; // ✅ 发车即退，等待真实任务完成后的广播唤醒！
+                }
+                // ----------------------------------------------------------------
+                // 第一路：发现数据齐全 (1) 且输出存在空洞 (0) -> 贪婪补漏计算！
+                // ----------------------------------------------------------------
+                else if (inputStatus == 1 && hasAnyOutputHole(ctx, modelTime)) {
+                    buildAndSubmitTask(ctx, modelTime, true);
+
+                    break; // ✅ 发车即退，等待真实任务完成后的广播唤醒！
                 }
 
-                // ----------------------------------------------------------------
-                // 第一路：发现空态 (0) -> 如果数据齐全且全是1，补漏计算！
-                // ----------------------------------------------------------------
-                if (hasOutputHoles(ctx, modelTime)) {
-                    if (inputStatus == 1) {
-                        buildAndSubmitTask(ctx, modelTime, true); // applyMask = true，生成掩膜保护已有数据
-                        changeOutputStates0To1(ctx, modelTime);   // 提前占位
-
-                        // 🎯 核心逻辑：跳过此次任务的输出时间段！
-                        modelTime = modelTime.plusSeconds(maxOutputSpanSec);
-                        continue;
-                    }
-                }
-
-                // 常规步进
-                modelTime = modelTime.plusSeconds(baseStepSec);
+                // 🎯 算法灵魂：时光倒流，一步步往回溯！
+                modelTime = modelTime.minusSeconds(baseStepSec);
             }
         }
     }
-
-    // ===================================================================================
-    // 算法辅助：带 oTimeStep 的时空定位 (支持多特征)
-    // ===================================================================================
-
-    // 返回值：0(不齐), 1(齐且全1), 2(齐且含2)
     private int checkInputsStatus(ModelTriggerContext ctx, Instant modelTime) {
         boolean hasState2 = false;
 
@@ -178,7 +537,6 @@ public class ModelEventTrigger {
             if (tAxis == null) continue;
             long resSec = getAxisResolutionInSeconds(tAxis);
 
-            // 🎯 核心：利用 oTimeStep 确定真实的输入起算时间！
             int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
             Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
 
@@ -187,61 +545,43 @@ public class ModelEventTrigger {
                     Instant reqT = actualStartTime.plusSeconds(i * resSec);
                     TSState state = ctx.getLocalState(f.getId(), reqT);
 
-                    if (state == null || state.hasHoles()) return 0; // 输入有空缺
-                    if (state.hasReplacedData()) hasState2 = true;   // 含有 2
+                    if (state == null || state.hasHoles()) return 0;
+                    if (state.hasReplacedData()) hasState2 = true;
                 }
             }
         }
         return hasState2 ? 2 : 1;
     }
-
-    private boolean hasOutputHoles(ModelTriggerContext ctx, Instant modelTime) {
+    /**
+     * 🎯 严格分块防线：只检查这一趟输出的【第一帧】！
+     * 只要第一帧有数据，说明整个块已经被上一个任务覆盖过了，游标静默滑过，直到遇到下一个真实的空洞起点！
+     */
+    private boolean isFirstOutputMomentAHole(ModelTriggerContext ctx, Instant modelTime) {
         for (Parameter p : ctx.getOutputParams()) {
             TimeAxis tAxis = p.getTimeAxis();
             if (tAxis == null) continue;
-            long resSec = getAxisResolutionInSeconds(tAxis);
 
+            long resSec = getAxisResolutionInSeconds(tAxis);
             int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
-            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
+            Instant firstOutT = modelTime.plusSeconds(offset * resSec);
 
             for (Feature f : p.getFeatureList()) {
-                for (int i = 0; i < tAxis.getCount(); i++) {
-                    Instant outT = actualStartTime.plusSeconds(i * resSec);
-                    if (outT.isAfter(currentPhysicalTime)) continue; // 未来不视为空洞
-
-                    TSState state = ctx.getLocalState(f.getId(), outT);
-                    if (state == null || state.hasHoles()) return true; // 发现任何一个特征有空洞就返回true
-                }
+                TSState state = ctx.getLocalState(f.getId(), firstOutT);
+                if (state == null || state.hasHoles()) return true;
             }
         }
         return false;
     }
 
-    private void changeInputStates2To1(ModelTriggerContext ctx, Instant modelTime) {
-        for (Parameter p : ctx.getInputParams()) {
-            TimeAxis tAxis = p.getTimeAxis();
-            if (tAxis == null) continue;
-            long resSec = getAxisResolutionInSeconds(tAxis);
-            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
-            Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
-
-            for (Feature f : p.getFeatureList()) {
-                for (int i = 0; i < tAxis.getCount(); i++) {
-                    Instant reqT = actualStartTime.plusSeconds(i * resSec);
-                    TSState state = ctx.getLocalState(f.getId(), reqT);
-                    if (state != null && state.hasReplacedData()) {
-                        state.getReplacedMask().clear();
-                        state.getReadyMask().set(0, calculateFrameSize(p));
-                    }
-                }
-            }
-        }
-    }
-
-    private void changeOutputStates0To1(ModelTriggerContext ctx, Instant modelTime) {
+    /**
+     * 🎯 终极防线：只要这趟发车的输出窗口里，包含任何一个空洞，就说明它能推进边界，必须发车！
+     * （多余的重叠帧会被底层存储的掩膜拦截，绝对安全）
+     */
+    private boolean hasAnyOutputHole(ModelTriggerContext ctx, Instant modelTime) {
         for (Parameter p : ctx.getOutputParams()) {
             TimeAxis tAxis = p.getTimeAxis();
             if (tAxis == null) continue;
+
             long resSec = getAxisResolutionInSeconds(tAxis);
             int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
             Instant actualStartTime = modelTime.plusSeconds(offset * resSec);
@@ -250,13 +590,36 @@ public class ModelEventTrigger {
                 for (int i = 0; i < tAxis.getCount(); i++) {
                     Instant outT = actualStartTime.plusSeconds(i * resSec);
                     TSState state = ctx.getLocalState(f.getId(), outT);
-                    if (state != null) {
-                        state.getReadyMask().set(0, calculateFrameSize(p));
-                    }
+                    // 只要发现输出序列里有任何一帧是空的，立刻返回 true 触发任务
+                    if (state == null || state.hasHoles()) return true;
+                }
+            }
+        }
+        return false;
+    }
+    /**
+     * 🎯 精准清除法：只清除游标所在的第一帧，绝不能用循环去清除整个窗口
+     */
+    private void changeInputStates2To1ForCurrentCursorOnly(ModelTriggerContext ctx, Instant modelTime) {
+        for (Parameter p : ctx.getInputParams()) {
+            TimeAxis tAxis = p.getTimeAxis();
+            if (tAxis == null) continue;
+            long resSec = getAxisResolutionInSeconds(tAxis);
+            int offset = (p.getoTimeStep() != null) ? p.getoTimeStep() : 0;
+
+            // 精确算出游标对应起点的这一帧时间
+            Instant firstReqT = modelTime.plusSeconds(offset * resSec);
+
+            for (Feature f : p.getFeatureList()) {
+                TSState state = ctx.getLocalState(f.getId(), firstReqT);
+                if (state != null && state.hasReplacedData()) {
+                    state.getReplacedMask().clear();
+                    state.getReadyMask().set(0, calculateFrameSize(p));
                 }
             }
         }
     }
+
 
     private void buildAndSubmitTask(ModelTriggerContext ctx, Instant modelTime, boolean applyMask) {
         List<ExecutableTask.TaskPort> inputPorts = new ArrayList<>();
@@ -289,7 +652,6 @@ public class ModelEventTrigger {
                 for (int t = 0; t < tCount; t++) {
                     Instant currentFrameTime = actualStartTime.plusSeconds(t * resSec);
                     TSState currentState = ctx.getLocalState(f.getId(), currentFrameTime);
-                    // 深拷贝局部沙盘中的原始真实状态，作为掩膜送入任务
                     statesForThisFeature.add(new TSState(currentState));
                 }
                 targetStatesPerFeature.add(statesForThisFeature);
@@ -302,7 +664,6 @@ public class ModelEventTrigger {
     }
 
     private void ensureZerosExistInContext(ModelTriggerContext ctx, Instant start, Instant end) {
-        // 根据输出参数定义，在模型沙盘里铺设 WAITING 状态，诱导扫盘算法
         for (Parameter p : ctx.getOutputParams()) {
             TimeAxis tAxis = p.getTimeAxis();
             if(tAxis == null) continue;
@@ -322,12 +683,6 @@ public class ModelEventTrigger {
                 .min().orElse(3600);
     }
 
-    private long calculateMaxSpanSeconds(List<Parameter> params) {
-        return params.stream()
-                .mapToLong(p -> p.getTimeAxis() != null ? (long)p.getTimeAxis().getCount() * getAxisResolutionInSeconds(p.getTimeAxis()) : 3600)
-                .max().orElse(3600);
-    }
-
     private int calculateFrameSize(Parameter p) {
         int w = 1, h = 1;
         if (p.getAxisList() != null) {
@@ -345,13 +700,10 @@ public class ModelEventTrigger {
         String unit = (tAxis.getUnit() != null) ? tAxis.getUnit().trim().toLowerCase() : "s";
         return unit.startsWith("h") ? (long)(res * 3600) : (unit.startsWith("m") ? (long)(res * 60) : (long)res);
     }
-    /**
-     * 注销模型功能 (同时安全清理沙盘路由表，防止内存泄漏)
-     */
+
     public void unregisterModel(int runtimeId) {
         ModelTriggerContext ctx = registry.remove(runtimeId);
         if (ctx != null) {
-            // 清理输入特征路由
             for (Parameter p : ctx.getInputParams()) {
                 for (Feature f : p.getFeatureList()) {
                     List<ModelTriggerContext> list = featureRouterMap.get(f.getId());
@@ -361,7 +713,6 @@ public class ModelEventTrigger {
                     }
                 }
             }
-            // 清理输出特征路由
             for (Parameter p : ctx.getOutputParams()) {
                 for (Feature f : p.getFeatureList()) {
                     List<ModelTriggerContext> list = featureRouterMap.get(f.getId());
@@ -380,7 +731,8 @@ public class ModelEventTrigger {
     // ===================================================================================
     // 🌍 [上帝视角] 打印真正的全局时间轴数据状态大盘 (跟随物理时钟推进)
     // ===================================================================================
-    private void printGlobalTimelineDashboard() {
+    // 🎯 新增 synchronized 关键字，防止多线程异步广播时抢占控制台导致打印顺序错乱
+    private synchronized void printGlobalTimelineDashboard() {
         System.out.println("\n================ 🌍 孪生沙盘：时间轴数据状态大盘 ================");
         System.out.println("⏰ 当前数字孪生系统时钟: " + currentPhysicalTime);
 
@@ -391,7 +743,6 @@ public class ModelEventTrigger {
             return;
         }
 
-        // 往前追溯 48 小时，一直打印到当前的最新时刻 (哪怕没有数据，也要把坑位打出来！)
         Instant startT = currentPhysicalTime.minusSeconds(48 * 3600);
 
         for (Instant t = startT; !t.isAfter(currentPhysicalTime); t = t.plusSeconds(3600)) {
@@ -400,7 +751,6 @@ public class ModelEventTrigger {
 
             for (Integer fId : allFeatures) {
                 String status = "⚪ WAITING(0) [空缺]";
-                // 去沙盘里查：这个时刻到底有没有数据？
                 if (featureRouterMap.get(fId) != null) {
                     for (ModelTriggerContext ctx : featureRouterMap.get(fId)) {
                         TSState state = ctx.getLocalState(fId, t);

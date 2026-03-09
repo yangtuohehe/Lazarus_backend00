@@ -36,10 +36,40 @@ public class ModelTriggerContext {
     }
 
     // 接收全局路由过来的状态，深拷贝到自己的沙盘中
+    // 接收全局路由过来的状态，深拷贝到自己的沙盘中（带有防降级保护）
     public void updateLocalState(TSState incoming) {
-        localStateTable.computeIfAbsent(incoming.getFeatureId(), k -> new ConcurrentHashMap<>())
-                .put(incoming.getTOrigin(), new TSState(incoming));
+        Map<Instant, TSState> featureMap = localStateTable.computeIfAbsent(incoming.getFeatureId(), k -> new ConcurrentHashMap<>());
+
+        featureMap.compute(incoming.getTOrigin(), (key, existingState) -> {
+            // 1. 如果本地还没坑位，直接存入
+            if (existingState == null) {
+                return new TSState(incoming);
+            }
+
+            // 2. 如果本地已经有了，做降级防御评估
+            boolean localIsHole = existingState.hasHoles();
+            boolean localIsReplaced = existingState.hasReplacedData();
+            boolean incomingIsHole = incoming.hasHoles();
+            boolean incomingIsReplaced = incoming.hasReplacedData();
+
+            // 🛑 防御一：本地是实测态(2)，绝不接受预测态(1)或空态(0)的覆盖
+            if (localIsReplaced && !incomingIsReplaced) {
+                return existingState;
+            }
+
+            // 🛑 防御二：本地是预测完的就绪态(1，无空洞)，绝不接受空态(0，有空洞)的覆盖
+            if (!localIsHole && incomingIsHole) {
+                return existingState;
+            }
+
+            // 🟢 允许升级或平替：0变1，1变2，或者状态相同刷新数据包
+            return new TSState(incoming);
+        });
     }
+//    public void updateLocalState(TSState incoming) {
+//        localStateTable.computeIfAbsent(incoming.getFeatureId(), k -> new ConcurrentHashMap<>())
+//                .put(incoming.getTOrigin(), new TSState(incoming));
+//    }
 
     public TSState getLocalState(int featureId, Instant time) {
         Map<Instant, TSState> featureMap = localStateTable.get(featureId);
