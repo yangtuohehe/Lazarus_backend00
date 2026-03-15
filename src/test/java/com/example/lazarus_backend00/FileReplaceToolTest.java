@@ -23,8 +23,8 @@ public class FileReplaceToolTest {
     public void replaceModelFile() throws IOException {
 
         // ================= 配置区域 =================
-        Integer targetId = 10; // 🎯 你要替换的那条记录的 ID
-        String newFilePath = "D:\\CODE\\project\\Lazarus\\Lazarus-数据处理\\output\\tem\\seqLen24_lead12.onnx"; // 📂 新文件的路径
+        Integer targetId = 15; // 🎯 你要替换的那条记录的 ID
+        String newFilePath = "D:\\CODE\\project\\Lazarus\\Data\\cae-rbnnmodel\\岛屿NDVI多步预测模型_7.onnx"; // 📂 新文件的路径
         // ===========================================
 
         Path path = Paths.get(newFilePath);

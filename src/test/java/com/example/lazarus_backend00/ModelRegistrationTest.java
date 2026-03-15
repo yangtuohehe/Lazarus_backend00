@@ -29,6 +29,8 @@ public class ModelRegistrationTest {
     @Test
     public void testFullRegistrationFlow() throws Exception {
         Integer targetModelId = 2;
+        // 🔥 新增：定义接口ID。传入 null 表示在测试中直接使用该模型的默认参数接口
+        Integer targetInterfaceId = null;
 
         System.out.println("\n🚀 第一步：调用 ContainerPoolService 进行全流程实例化与注册...");
 
@@ -36,7 +38,7 @@ public class ModelRegistrationTest {
             // ==========================================================
             // 🔥 核心点火：直接调你的真实业务接口！
             // ==========================================================
-            ModelContainerDTO dto = containerPoolService.registerContainer(targetModelId);
+            ModelContainerDTO dto = containerPoolService.registerContainer(targetModelId, targetInterfaceId);
 
             System.out.println("   ✅ 成功调用 registerContainer！");
             System.out.println("   ↳ 分配到的 Container ID: " + dto.getId());

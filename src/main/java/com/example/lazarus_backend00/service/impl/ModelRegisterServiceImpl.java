@@ -261,7 +261,8 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
+import org.geotools.referencing.GeodeticCalculator;
+import java.awt.geom.Point2D;
 @Service
 public class ModelRegisterServiceImpl implements ModelRegisterService {
 
@@ -462,6 +463,87 @@ public class ModelRegisterServiceImpl implements ModelRegisterService {
         featureParameterDao.insert(relation);
     }
 
+//    private Geometry calculateCoverageFromEntities(Geometry originGeo, List<Axis> axes) {
+//        // 1. 基础校验
+//        if (originGeo == null || !(originGeo instanceof Point)) {
+//            return originGeo;
+//        }
+//        Point origin = (Point) originGeo;
+//        Coordinate c = origin.getCoordinate();
+//
+//        // 2. 解析轴信息
+//        Integer xCount = null; Double xRes = null;
+//        Integer yCount = null; Double yRes = null;
+//        Integer zCount = null; Double zRes = null;
+//
+//        if (axes != null) {
+//            for (Axis axis : axes) {
+//                if (axis instanceof SpaceAxisXEntity) {
+//                    xCount = ((SpaceAxisXEntity) axis).getCount();
+//                    xRes = ((SpaceAxisXEntity) axis).getResolution();
+//                } else if (axis instanceof SpaceAxisYEntity) {
+//                    yCount = ((SpaceAxisYEntity) axis).getCount();
+//                    yRes = ((SpaceAxisYEntity) axis).getResolution();
+//                } else if (axis instanceof SpaceAxisZEntity) {
+//                    zCount = ((SpaceAxisZEntity) axis).getCount();
+//                    zRes = ((SpaceAxisZEntity) axis).getResolution();
+//                }
+//            }
+//        }
+//
+//        // 如果维度信息缺失，直接返回原点
+//        if (xCount == null || yCount == null || xRes == null || yRes == null) {
+//            return origin;
+//        }
+//
+//        // 3. 计算 2D 边界 (原点是左上角 minX, maxY)
+//        double minX = c.getX();
+//        double maxX = minX + (xCount * xRes); // 向东(右)加
+//
+//        double maxY = c.getY();
+//        double minY = maxY - (yCount * yRes); // 向南(下)减 🔥 核心修正
+//
+//        // 4. 计算 3D 边界 (原点是最高层 maxZ)
+//        boolean is3D = (zCount != null && zRes != null && !Double.isNaN(c.getZ()));
+//        double maxZ = is3D ? c.getZ() : 0.0;
+//        // 如果原点是最高层，那么底层 minZ 应该是 maxZ 减去深度 🔥 核心修正
+//        double minZ = is3D ? (maxZ - (zCount * zRes)) : 0.0;
+//
+//        // 5. 构建多边形 (逆时针顺序：左下 -> 右下 -> 右上 -> 左上 -> 左下)
+//        // 注意：为了兼容 PostGIS 等数据库，建议返回 planar (平面) 的多边形。
+//        // 如果需要保留 Z 信息，通常建议将 Z 设为 maxZ (顶层平面) 或 minZ (底层平面)，而不是让 Z 乱跳。
+//        // 这里我们构建一个位于 "maxZ" 高度的平面多边形，或者纯 2D 多边形。
+//
+//        Coordinate[] coords;
+//        if (is3D) {
+//            // 构建 3D 坐标，Z 统一使用 maxZ (或者使用 minZ)，保证多边形是平面的。
+//            // 如果 Z 值在四个角不同，JTS 会认为这是一个非法多边形（非平面）。
+//            coords = new Coordinate[]{
+//                    new Coordinate(minX, minY, maxZ), // 左下
+//                    new Coordinate(maxX, minY, maxZ), // 右下
+//                    new Coordinate(maxX, maxY, maxZ), // 右上
+//                    new Coordinate(minX, maxY, maxZ), // 左上
+//                    new Coordinate(minX, minY, maxZ)  // 闭合
+//            };
+//        } else {
+//            // 纯 2D
+//            coords = new Coordinate[]{
+//                    new Coordinate(minX, minY), // 左下
+//                    new Coordinate(maxX, minY), // 右下
+//                    new Coordinate(maxX, maxY), // 右上
+//                    new Coordinate(minX, maxY), // 左上
+//                    new Coordinate(minX, minY)  // 闭合
+//            };
+//        }
+//
+//        Polygon p = gf.createPolygon(coords);
+//        p.setSRID(4326);
+//        return p;
+//    }
+    /**
+     * 🌟 私有工具方法：仅使用 Entity 数据进行几何计算
+     * 🚀 严谨版：基于 GeoTools GeodeticCalculator 的 WGS84 椭球体精确偏移推算
+     */
     private Geometry calculateCoverageFromEntities(Geometry originGeo, List<Axis> axes) {
         // 1. 基础校验
         if (originGeo == null || !(originGeo instanceof Point)) {
@@ -471,8 +553,8 @@ public class ModelRegisterServiceImpl implements ModelRegisterService {
         Coordinate c = origin.getCoordinate();
 
         // 2. 解析轴信息
-        Integer xCount = null; Double xRes = null;
-        Integer yCount = null; Double yRes = null;
+        Integer xCount = null; Double xRes = null; String xUnit = null;
+        Integer yCount = null; Double yRes = null; String yUnit = null;
         Integer zCount = null; Double zRes = null;
 
         if (axes != null) {
@@ -480,9 +562,11 @@ public class ModelRegisterServiceImpl implements ModelRegisterService {
                 if (axis instanceof SpaceAxisXEntity) {
                     xCount = ((SpaceAxisXEntity) axis).getCount();
                     xRes = ((SpaceAxisXEntity) axis).getResolution();
+                    xUnit = ((SpaceAxisXEntity) axis).getUnit();
                 } else if (axis instanceof SpaceAxisYEntity) {
                     yCount = ((SpaceAxisYEntity) axis).getCount();
                     yRes = ((SpaceAxisYEntity) axis).getResolution();
+                    yUnit = ((SpaceAxisYEntity) axis).getUnit();
                 } else if (axis instanceof SpaceAxisZEntity) {
                     zCount = ((SpaceAxisZEntity) axis).getCount();
                     zRes = ((SpaceAxisZEntity) axis).getResolution();
@@ -490,48 +574,67 @@ public class ModelRegisterServiceImpl implements ModelRegisterService {
             }
         }
 
-        // 如果维度信息缺失，直接返回原点
         if (xCount == null || yCount == null || xRes == null || yRes == null) {
             return origin;
         }
 
-        // 3. 计算 2D 边界 (原点是左上角 minX, maxY)
         double minX = c.getX();
-        double maxX = minX + (xCount * xRes); // 向东(右)加
+        double minY = c.getY();
+        double maxX = minX;
+        double maxY = minY;
 
-        double maxY = c.getY();
-        double minY = maxY - (yCount * yRes); // 向南(下)减 🔥 核心修正
+        // =========================================================
+        // 🚀 核心严谨计算：使用 GeoTools 测地线计算器 (GeodeticCalculator)
+        // =========================================================
 
-        // 4. 计算 3D 边界 (原点是最高层 maxZ)
+        // 3. 计算 X 轴极大值 (向东偏移)
+        if ("meter".equalsIgnoreCase(xUnit) || "m".equalsIgnoreCase(xUnit)) {
+            GeodeticCalculator calcX = new GeodeticCalculator();
+            calcX.setStartingGeographicPoint(minX, minY);
+            // 方位角 90.0 度代表正东，距离为米
+            calcX.setDirection(90.0, xCount * xRes);
+            Point2D destX = calcX.getDestinationGeographicPoint();
+            maxX = destX.getX();
+        } else {
+            // 如果是度，直接相加
+            maxX = minX + (xCount * xRes);
+        }
+
+        // 4. 计算 Y 轴极大值 (向南偏移)
+        if ("meter".equalsIgnoreCase(yUnit) || "m".equalsIgnoreCase(yUnit)) {
+            GeodeticCalculator calcY = new GeodeticCalculator();
+            calcY.setStartingGeographicPoint(minX, minY);
+            // 依据你原本的逻辑：Y轴是向南(下)减的。
+            // 方位角 180.0 度代表正南，距离为米
+            calcY.setDirection(180.0, yCount * yRes);
+            Point2D destY = calcY.getDestinationGeographicPoint();
+            maxY = destY.getY();
+        } else {
+            // 如果是度，依据原逻辑相减
+            maxY = minY - (yCount * yRes);
+        }
+
+        // 5. 计算 3D 边界与构建多边形 (后续逻辑保持不变)
         boolean is3D = (zCount != null && zRes != null && !Double.isNaN(c.getZ()));
         double maxZ = is3D ? c.getZ() : 0.0;
-        // 如果原点是最高层，那么底层 minZ 应该是 maxZ 减去深度 🔥 核心修正
         double minZ = is3D ? (maxZ - (zCount * zRes)) : 0.0;
-
-        // 5. 构建多边形 (逆时针顺序：左下 -> 右下 -> 右上 -> 左上 -> 左下)
-        // 注意：为了兼容 PostGIS 等数据库，建议返回 planar (平面) 的多边形。
-        // 如果需要保留 Z 信息，通常建议将 Z 设为 maxZ (顶层平面) 或 minZ (底层平面)，而不是让 Z 乱跳。
-        // 这里我们构建一个位于 "maxZ" 高度的平面多边形，或者纯 2D 多边形。
 
         Coordinate[] coords;
         if (is3D) {
-            // 构建 3D 坐标，Z 统一使用 maxZ (或者使用 minZ)，保证多边形是平面的。
-            // 如果 Z 值在四个角不同，JTS 会认为这是一个非法多边形（非平面）。
             coords = new Coordinate[]{
-                    new Coordinate(minX, minY, maxZ), // 左下
-                    new Coordinate(maxX, minY, maxZ), // 右下
-                    new Coordinate(maxX, maxY, maxZ), // 右上
-                    new Coordinate(minX, maxY, maxZ), // 左上
-                    new Coordinate(minX, minY, maxZ)  // 闭合
+                    new Coordinate(minX, minY, maxZ),
+                    new Coordinate(maxX, minY, maxZ),
+                    new Coordinate(maxX, maxY, maxZ),
+                    new Coordinate(minX, maxY, maxZ),
+                    new Coordinate(minX, minY, maxZ)
             };
         } else {
-            // 纯 2D
             coords = new Coordinate[]{
-                    new Coordinate(minX, minY), // 左下
-                    new Coordinate(maxX, minY), // 右下
-                    new Coordinate(maxX, maxY), // 右上
-                    new Coordinate(minX, maxY), // 左上
-                    new Coordinate(minX, minY)  // 闭合
+                    new Coordinate(minX, minY),
+                    new Coordinate(maxX, minY),
+                    new Coordinate(maxX, maxY),
+                    new Coordinate(minX, maxY),
+                    new Coordinate(minX, minY)
             };
         }
 
@@ -539,7 +642,6 @@ public class ModelRegisterServiceImpl implements ModelRegisterService {
         p.setSRID(4326);
         return p;
     }
-
     private void saveAxis(Axis axis, Integer paramId, LocalDateTime now) {
         if (axis instanceof SpaceAxisXEntity) {
             SpaceAxisXEntity e = (SpaceAxisXEntity) axis;

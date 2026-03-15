@@ -262,6 +262,13 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
     }
 
     @Override
+    public List<Parameter> getParametersByInterface(Integer interfaceId) {
+        // 直接复用你之前写好的内部组装方法
+        return assembleDomainParameters(interfaceId);
+    }
+
+
+    @Override
     public ModelContainer reconstructContainer(Integer modelId) {
         DynamicProcessModelEntity modelEntity = modelDao.selectById(modelId);
         if (modelEntity == null) throw new IllegalArgumentException("Model not found ID: " + modelId);
@@ -282,7 +289,41 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
 
         return containerFactory.createContainer(modelId, modelEntity.getVersion(), engineType, domainParameters);
     }
+@Override
+public ModelContainer reconstructContainer(Integer modelId, Integer interfaceId) {
+    DynamicProcessModelEntity modelEntity = modelDao.selectById(modelId);
+    if (modelEntity == null) throw new IllegalArgumentException("Model not found ID: " + modelId);
 
+    ModelInterfaceEntity interfaceQuery = new ModelInterfaceEntity();
+    interfaceQuery.setProcessmodelId(modelId);
+    List<ModelInterfaceEntity> interfaces = interfaceDao.selectByCondition(interfaceQuery);
+
+    ModelInterfaceEntity targetInterface = null;
+
+    // ================= 核心修改点：接口选择逻辑 =================
+    if (interfaceId != null) {
+        // 1. 如果前端明确传入了 interfaceId，则精确匹配
+        targetInterface = interfaces.stream()
+                .filter(i -> i.getId().equals(interfaceId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("指定的接口不存在或不属于该模型 ID: " + interfaceId));
+    } else {
+        // 2. 如果没有传入 interfaceId，执行原有的兜底策略（找默认的，没有默认就拿第一个）
+        targetInterface = interfaces.stream()
+                .filter(i -> Boolean.TRUE.equals(i.getIsDefault()))
+                .findFirst()
+                .orElse(interfaces.isEmpty() ? null : interfaces.get(0));
+    }
+    // =========================================================
+
+    if (targetInterface == null) throw new IllegalStateException("No interface for model ID=" + modelId);
+
+    // 后续逻辑保持不变，但使用的是我们筛选出来的 targetInterface 的 getId()
+    List<Parameter> domainParameters = assembleDomainParameters(targetInterface.getId());
+    String engineType = determineEngineType(modelEntity);
+
+    return containerFactory.createContainer(modelId, modelEntity.getVersion(), engineType, domainParameters);
+}
     public String determineEngineType(DynamicProcessModelEntity model) {
         Integer id = model.getId();
         byte[] header = null;
@@ -327,11 +368,11 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
     private List<Axis> fetchAxes(Integer paramId) {
         List<Axis> axes = new ArrayList<>();
 
-        // ✅ 核心修正：手动将 Entity 属性拷贝至真正的 Domain 类
         SpaceAxisXEntity xEntity = xAxisDao.selectByParameterId(paramId);
         if (xEntity != null) {
             SpaceAxisX x = new SpaceAxisX();
             copyBase(xEntity, x);
+            x.setType("X"); // 🔥 新增：必须显式设置类型
             axes.add(x);
         }
 
@@ -339,6 +380,7 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
         if (yEntity != null) {
             SpaceAxisY y = new SpaceAxisY();
             copyBase(yEntity, y);
+            y.setType("Y"); // 🔥 新增：必须显式设置类型
             axes.add(y);
         }
 
@@ -346,6 +388,7 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
         if (zEntity != null) {
             SpaceAxisZ z = new SpaceAxisZ();
             copyBase(zEntity, z);
+            z.setType("Z"); // 🔥 新增：必须显式设置类型
             axes.add(z);
         }
 
@@ -353,7 +396,7 @@ public class ModelContainerProviderImpl implements ModelContainerProvider {
         if (tEntity != null) {
             TimeAxis t = new TimeAxis();
             copyBase(tEntity, t);
-            t.setType("TIME"); // 必须显式设置类型
+            t.setType("TIME");
             axes.add(t);
         }
 

@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-//@Transactional // 测试结束后自动回滚，不污染数据库
+@Transactional // 测试结束后自动回滚，不污染数据库
 public class ModelRegisterIntegrationTest {
 
     @Autowired

@@ -65,7 +65,7 @@ public class ModelRegisterController {
                 ParameterEntity param = new ParameterEntity();
                 param.setIoType(pDto.getIoType());
                 param.setTensorOrder(pDto.getTensorOrder());
-
+                param.setoTimeStep(pDto.getoTimeStep());
                 // 处理原点 (2D/3D)
                 Coordinate coord;
                 if (pDto.getOriginPointAlt() != null) {

@@ -22,7 +22,7 @@ public class ModelSelectExistingDataTest {
         // 1. 测试接口一：多条件组合查询模型层级
         // =================================================================
         // ⚠️ 请修改下面的 "盐度" 为你数据库里真实存在的模型名称
-        String searchName = "MJ盐度模型";
+        String searchName = "东岛";
         String searchPaper = null; // 论文来源，不想测传 null
         String searchAuthor = null; // 作者，不想测传 null
 
@@ -53,7 +53,7 @@ public class ModelSelectExistingDataTest {
         // 3. 测试接口三：按时空条件反查模型
         // =================================================================
         // ⚠️ 请修改下面的 12 为你数据库里真实存在的时间步数 (Count)
-        Integer targetTimeCount = 12;
+        Integer targetTimeCount = 3;
         String targetIoType = "OUTPUT";
 
         System.out.println(">>> [Test 3] 正在反查时空条件: IO=" + targetIoType + ", TimeCount=" + targetTimeCount);

@@ -20,6 +20,7 @@ public class Parameter {
 
     private final String ioType;
     private final Integer tensorOrder;//说明这个参数属于第几个张量
+//    @JsonProperty("oTimeStep")
     private final Integer oTimeStep; // <--- 🔥 新增字段
     private final Point originPoint;
 

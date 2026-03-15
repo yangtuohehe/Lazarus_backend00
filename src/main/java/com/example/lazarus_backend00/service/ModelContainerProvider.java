@@ -1,6 +1,9 @@
 package com.example.lazarus_backend00.service;
 
 import com.example.lazarus_backend00.component.container.ModelContainer;
+import com.example.lazarus_backend00.component.container.Parameter;
+
+import java.util.List;
 
 /**
  * 模型容器构建服务 (原 ModelLoadingService)
@@ -17,4 +20,7 @@ public interface ModelContainerProvider {
      * @return 已实例化但未加载数据的容器 (Lightweight Object)
      */
     ModelContainer reconstructContainer(Integer modelId);
+    // 新增 interfaceId 参数，允许为 null
+    ModelContainer reconstructContainer(Integer modelId, Integer interfaceId);
+    List<Parameter> getParametersByInterface(Integer interfaceId);
 }
